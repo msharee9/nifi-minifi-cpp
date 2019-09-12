@@ -85,7 +85,7 @@ function(use_bundled_libcoap SOURCE_DIR BINARY_DIR)
                 INSTALL_COMMAND make install
                 BUILD_BYPRODUCTS "${BINARY_DIR}/thirdparty/libcoap-install/${BYPRODUCT}"
                 CONFIGURE_COMMAND ""
-                PATCH_COMMAND ./autogen.sh && PKG_CONFIG_PATH=${BINARY_DIR}/thirdparty/openssl111-install/lib/pkgconfig/ ./configure --with-openssl --disable-examples --disable-tests --disable-documentation --prefix=${BINARY_DIR}/thirdparty/libcoap-install
+                PATCH_COMMAND ./autogen.sh && PKG_CONFIG_PATH=${BINARY_DIR}/thirdparty/openssl111-install/lib/pkgconfig/ ./configure --with-openssl --enable-dtls --disable-examples --disable-tests --disable-documentation --prefix=${BINARY_DIR}/thirdparty/libcoap-install
                 STEP_TARGETS build
                 EXCLUDE_FROM_ALL TRUE
         )

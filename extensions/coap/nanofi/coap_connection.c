@@ -16,6 +16,8 @@
  * limitations under the License.
  */
 #include "coap_connection.h"
+#include "coap_functions.h"
+#include "dtls_config.h"
 
 #ifdef WIN32
 #include <winsock2.h>
@@ -23,82 +25,83 @@
 #include <netdb.h>
 #endif
 
-CoapPDU *create_connection(uint8_t type, const char * const server, const char * const endpoint, int port, const CoapMessage * const message) {
-  CoapPDU *pdu = (CoapPDU*) malloc(sizeof(CoapPDU));
+CoapPDU * setup_coap_pdu(const char * const server, const char * const endpoint, coap_uri_t * uri) {
+    CoapPDU *pdu = (CoapPDU*) malloc(sizeof(CoapPDU));
 
-  pdu->ctx = NULL;
-  pdu->session = NULL;
+    pdu->ctx = NULL;
+    pdu->session = NULL;
 
+    uri->host.s = (uint8_t*) server;  // may be a loss in resolution, but hostnames should be char *
+    uri->host.length = strlen(server);
+    uri->path.s = (uint8_t*) endpoint;  // ^ same as above for paths.
+    uri->path.length = strlen(endpoint);
+
+    int res = resolve_address(&uri->host, &pdu->dst_addr.addr.sa);
+    if (res < 0) {
+      free_pdu(pdu);
+      return NULL;
+    }
+    pdu->dst_addr.size = res;
+    pdu->dst_addr.addr.sin.sin_port = htons(uri->port);
+
+    return pdu;
+}
+
+CoapPDU * create_coap_connection(uint8_t type, const char * const server, const char * const endpoint, const CoapMessage * const message, coap_uri_t uri, dtls_config * dc) {
+    CoapPDU * pdu = setup_coap_pdu(server, endpoint, &uri);
+    if (!pdu) return NULL;
+
+    char port_str[NI_MAXSERV] = "0";
+    if (create_session(&pdu->ctx, &pdu->session, 0x00, port_str, &pdu->dst_addr, dc) < 0) {
+        free_pdu(pdu);
+        return NULL;
+    }
+
+    // we want to register handlers in the event that an error occurs or nack is returned
+    // from the library
+    coap_register_event_handler(pdu->ctx, coap_event);
+    coap_register_nack_handler(pdu->ctx, no_acknowledgement);
+    coap_context_set_keepalive(pdu->ctx, 1);
+    coap_register_option(pdu->ctx, COAP_OPTION_BLOCK2);
+    // set the response handler
+    coap_register_response_handler(pdu->ctx, response_handler);
+
+    pdu->session->max_retransmit = 1;
+    pdu->optlist = NULL;
+    // add the URI option to the options list
+    coap_insert_optlist(&pdu->optlist, coap_new_optlist(COAP_OPTION_URI_PATH, uri.path.length, uri.path.s));
+
+    coap_pdu_t* request;
+    coap_str_const_t pld;
+    pld.length = message->size_;
+    pld.s = message->data_;
+
+    // next, create the PDU.
+    if (!(request = create_request(pdu->ctx, pdu->session, &pdu->optlist, type, &pld))) {
+        free_pdu(pdu);
+        return NULL;
+    }
+
+    // send the PDU using the session.
+    coap_send(pdu->session, request);
+    return pdu;
+}
+
+CoapPDU *create_secure_connection(uint8_t type, const char * const server, const char * const endpoint, uint16_t port, const CoapMessage * const message, dtls_config * dc) {
+  if (!dc) return NULL;
   coap_uri_t uri;
-  uri.host.s = (uint8_t*) server;  // may be a loss in resolution, but hostnames should be char *
-  uri.host.length = strlen(server);
-  uri.path.s = (uint8_t*) endpoint;  // ^ same as above for paths.
-  uri.path.length = strlen(endpoint);
+  memset(&uri, 0, sizeof(uri));
   uri.port = port;
-  uri.scheme = COAP_URI_SCHEME_COAP;
+  uri.scheme = COAP_URI_SCHEME_COAPS;
+  return create_coap_connection(type, server, endpoint, message, uri, dc);
+}
 
-  fd_set readfds;
-  coap_pdu_t* request;
-  unsigned char get_method = 1;
-
-  int res = resolve_address(&uri.host, &pdu->dst_addr.addr.sa);
-  if (res < 0) {
-    return NULL;
-  }
-  pdu->dst_addr.size = res;
-  pdu->dst_addr.addr.sin.sin_port = htons(uri.port);
-
-  void *addrptr = NULL;
-  char port_str[NI_MAXSERV] = "0";
-
-  switch (pdu->dst_addr.addr.sa.sa_family) {
-    case AF_INET:
-      addrptr = &pdu->dst_addr.addr.sin.sin_addr;
-      if (!create_session(&pdu->ctx, &pdu->session, 0x00, port_str, &pdu->dst_addr)) {
-        break;
-      } else {
-        return NULL;
-      }
-    case AF_INET6:
-      addrptr = &pdu->dst_addr.addr.sin6.sin6_addr;
-      if (!create_session(&pdu->ctx, &pdu->session, 0x00, port_str, &pdu->dst_addr)) {
-        break;
-      } else {
-        return NULL;
-      }
-    default:
-      ;
-  }
-
-  // we want to register handlers in the event that an error occurs or nack is returned
-  // from the library
-  coap_register_event_handler(pdu->ctx, coap_event);
-  coap_register_nack_handler(pdu->ctx, no_acknowledgement);
-
-  coap_context_set_keepalive(pdu->ctx, 1);
-
-  coap_str_const_t pld;
-  pld.length = message->size_;
-  pld.s = message->data_;
-
-  coap_register_option(pdu->ctx, COAP_OPTION_BLOCK2);
-
-  // set the response handler
-  coap_register_response_handler(pdu->ctx, response_handler);
-
-  pdu->session->max_retransmit = 1;
-  pdu->optlist = NULL;
-
-  // add the URI option to the options list
-  coap_insert_optlist(&pdu->optlist, coap_new_optlist(COAP_OPTION_URI_PATH, uri.path.length, uri.path.s));
-
-  // next, create the PDU.
-  if (!(request = create_request(pdu->ctx, pdu->session, &pdu->optlist, type, &pld)))
-    return NULL;
-
-  // send the PDU using the session.
-  coap_send(pdu->session, request);
-  return pdu;
+CoapPDU *create_connection(uint8_t type, const char * const server, const char * const endpoint, uint16_t port, const CoapMessage * const message) {
+    coap_uri_t uri;
+    memset(&uri, 0, sizeof(uri));
+    uri.port = port;
+    uri.scheme = COAP_URI_SCHEME_COAP;
+    return create_coap_connection(type, server, endpoint, message, uri, NULL);
 }
 
 int8_t send_pdu(const CoapPDU * const pdu) {
@@ -122,6 +125,7 @@ int8_t free_pdu(CoapPDU * pdu) {
   }
   coap_delete_optlist(pdu->optlist);
   coap_session_release(pdu->session);
+  free_app_data(pdu->ctx);
   coap_free_context(pdu->ctx);
   free(pdu);
   return 0;

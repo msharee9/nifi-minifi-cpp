@@ -258,7 +258,6 @@ if(NOT WIN32)
 endif()
 
 include_directories(thirdparty/ut)
-
 if (DISABLE_CURL)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DDISABLE_CURL")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DDISABLE_CURL")
@@ -268,7 +267,6 @@ if(NOT DISABLE_CURL)
 
   set(CURL_C_FLAGS "${CMAKE_C_FLAGS}")
   set(CURL_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-
 
 get_property(LIB64 GLOBAL PROPERTY FIND_LIBRARY_USE_LIB64_PATHS)
 
@@ -470,8 +468,8 @@ if (ENABLE_ALL OR ENABLE_COAP STREQUAL "ON")
 	use_bundled_libcoap(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 	createExtension(COAP-EXTENSION "COAP EXTENSIONS" "Enables LibCOAP Functionality." "extensions/coap" "extensions/coap/tests/")
 	if( NOT DISABLE_CURL)
-		add_dependencies(minifi-coap minifi-http-curl)
-	endif()
+	    add_dependencies(minifi-coap minifi-http-curl)
+    endif()
 endif()
 
 if (WIN32)

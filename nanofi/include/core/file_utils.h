@@ -21,6 +21,7 @@
 
 #include "utlist.h"
 #include "flowfiles.h"
+#include "cstructs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,6 +39,13 @@ void remove_directory(const char * path);
  * @return 1 if path is directory else 0
  */
 int is_directory(const char * path);
+
+/**
+ * Determine if the provided file path exists
+ * @param path the path to the file
+ * @return 1 if path points to a file else 0
+ */
+int is_file_exists(const char * path);
 
 /*
  * Get the platform-specific path separator.
@@ -70,6 +78,13 @@ int make_dir(const char * path);
  * it is left to the caller to free it
  */
 char * get_current_working_directory();
+
+/**
+ * Return a key value pair properties from file
+ * @param file_path the path to the properties file
+ * @return properties key value pair
+ */
+properties_t * read_configuration_file(const char * file_path);
 
 #ifdef __cplusplus
 }

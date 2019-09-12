@@ -23,6 +23,7 @@ extern "C" {
 #endif
 
 #include <coap2/coap.h>
+#include "dtls_config.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -52,6 +53,8 @@ typedef struct {
  * @return CoAPServer structure.
  */
 CoapServerContext * const create_server(const char *const server_hostname, const char * const port);
+
+CoapServerContext * const create_secure_server(const char * const server_hostname, const char * const port, dtls_config * dc);
 
 /**
  * Creates an endpoint for the provided service context

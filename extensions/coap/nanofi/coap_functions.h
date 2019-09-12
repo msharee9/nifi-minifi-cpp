@@ -22,6 +22,12 @@
 extern "C" {
 #endif
 
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#endif
 
 typedef unsigned char method_t;
 
@@ -31,6 +37,7 @@ typedef unsigned char method_t;
 
 #include <stdio.h>
 #include <string.h>
+
 #ifdef WIN32
 #include <winsock2.h>
 #else
@@ -41,7 +48,7 @@ typedef unsigned char method_t;
 #endif
 
 #include "coap_message.h"
-
+#include "dtls_config.h"
 
 typedef struct {
   void (*data_received)(void *receiver_context, struct coap_context_t *ctx, CoapMessage *const);
@@ -65,15 +72,17 @@ void init_coap_api(void *rcvr, callback_pointers *ptrs);
  * @param dst_addr destination address
  * @return 0 if success -1 otherwise.
  */
-int create_session(coap_context_t **ctx, coap_session_t **session, const char *node, const char *port, coap_address_t *dst_addr);
+int create_session(coap_context_t **ctx, coap_session_t **session, const char *node, const char *port, coap_address_t *dst_addr, dtls_config * dc);
 
 /**
  * Creates an endpoint context
  * @param ctx pointer to a context
  * @param node device node name
  * @param port device port
+ * @param proto the coap protocol
+ * @param dc the dtls configuration
  */
-int create_endpoint_context(coap_context_t **ctx, const char *node, const char *port);
+int create_endpoint_context(coap_context_t ** ctx, const char * node, const char * port, coap_proto_t proto, dtls_config * dc);
 
 /**
  * Creates a request object with an already allocated context and session. The option list is sent in as an arry ptr.
@@ -123,6 +132,8 @@ void response_handler(struct coap_context_t *ctx, struct coap_session_t *session
  * @return 0 if sucess -1 otherwise
  */
 int resolve_address(const struct coap_str_const_t *server, struct sockaddr *destination);
+
+void free_app_data(struct coap_context_t * ctx);
 
 #ifdef __cplusplus
 }

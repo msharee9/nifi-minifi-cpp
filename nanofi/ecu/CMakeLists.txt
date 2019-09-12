@@ -31,14 +31,28 @@ if (NOT WIN32)
 
 add_executable(log_aggregator log_aggregator.c)
 
-target_link_libraries(log_aggregator nanofi ${CMAKE_THREAD_LIBS_INIT}  ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
+target_link_libraries(log_aggregator nanofi ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
 
 add_executable(tailfile_chunk tailfile_chunk.c)
 
-target_link_libraries(tailfile_chunk nanofi ${CMAKE_THREAD_LIBS_INIT}  ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
+target_link_libraries(tailfile_chunk nanofi ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
 
 add_executable(tailfile_delimited tailfile_delimited.c)
 
-target_link_libraries(tailfile_delimited nanofi ${CMAKE_THREAD_LIBS_INIT}  ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
+target_link_libraries(tailfile_delimited nanofi ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
 
 endif()
+
+if (ENABLE_COAP STREQUAL "ON")
+add_executable(tailfile_ecu_c2 tailfile_ecu_c2.c)
+add_dependencies(tailfile_ecu_c2 nanofi)
+target_link_libraries(tailfile_ecu_c2 PRIVATE nanofi)
+
+add_executable(c2_server c2_server.c)
+add_dependencies(c2_server nanofi)
+target_link_libraries(c2_server PUBLIC nanofi ${CMAKE_THREAD_LIBS_INIT})
+
+add_executable(c2_client c2_client.c)
+add_dependencies(c2_client nanofi)
+target_link_libraries(c2_client PRIVATE nanofi ${CMAKE_THREAD_LIBS_INIT})
+endif(ENABLE_COAP STREQUAL "ON")

@@ -17,28 +17,30 @@
 # under the License.
 #
 
-
 include(${CMAKE_SOURCE_DIR}/extensions/ExtensionHeader.txt)
 include_directories(protocols nanofi controllerservice server)
 include_directories(../http-curl/)
 
 file(GLOB CSOURCES "nanofi/*.c")
-file(GLOB SOURCES "*.cpp" "protocols/*.cpp" "processors/*.cpp" "controllerservice/*.cpp" "server/*.cpp" )
+file(GLOB SOURCES "*.cpp" "protocols/*.cpp" "controllerservice/*.cpp" "server/*.cpp" )
+set(BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+add_definitions("-DWITH_POSIX=1")
 
-add_library(nanofi-coap-c STATIC ${CSOURCES})
 add_library(minifi-coap STATIC ${SOURCES})
-set_property(TARGET minifi-coap PROPERTY POSITION_INDEPENDENT_CODE ON)
+add_library(nanofi-coap-c STATIC ${CSOURCES})
 
-if(CMAKE_THREAD_LIBS_INIT)
-  target_link_libraries(minifi-coap "${CMAKE_THREAD_LIBS_INIT}")
-endif()
+target_include_directories(nanofi-coap-c PUBLIC ${COAP_INCLUDE_DIRS})
+target_include_directories(minifi-coap PUBLIC ${COAP_INCLUDE_DIRS})
 
-target_link_libraries(nanofi-coap-c COAP::libcoap)
-target_link_libraries(minifi-coap ${LIBMINIFI})
-target_link_libraries(minifi-coap nanofi-coap-c COAP::libcoap minifi-http-curl)
+add_dependencies(minifi-coap nanofi-coap-c)
+add_dependencies(nanofi-coap-c COAP::libcoap) 
+
+target_link_libraries(nanofi-coap-c PUBLIC ${COAP_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+target_link_libraries(minifi-coap PUBLIC nanofi-coap-c ${COAP_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+
 if (WIN32)
     set_target_properties(minifi-coap PROPERTIES
-        LINK_FLAGS "/WHOLEARCHIVE:minifi-coap"
+         LINK_FLAGS "/WHOLEARCHIVE"
     )
 elseif (APPLE)
     set_target_properties(minifi-coap PROPERTIES
@@ -52,4 +54,3 @@ endif ()
 
 SET (COAP-EXTENSION minifi-coap PARENT_SCOPE)
 register_extension(minifi-coap)
-

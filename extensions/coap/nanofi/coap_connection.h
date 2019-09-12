@@ -23,9 +23,7 @@ extern "C" {
 
 #include <coap2/coap.h>
 #include "coap_message.h"
-#include "coap_functions.h"
-
-
+#include "dtls_config.h"
 
 typedef struct {
   struct coap_context_t* ctx;
@@ -34,7 +32,6 @@ typedef struct {
   coap_address_t src_addr;
   coap_optlist_t *optlist;
 } CoapPDU;
-
 
 /**
  * Creates a connection to the server
@@ -45,7 +42,19 @@ typedef struct {
  * @param message message to send
  * @return CoAPPDU object.
  */
-CoapPDU *create_connection(uint8_t type, const char * const server, const char * const endpoint, int port, const CoapMessage * const message);
+CoapPDU *create_connection(uint8_t type, const char * const server, const char * const endpoint, uint16_t port, const CoapMessage * const message);
+
+/**
+ * Creates a secure connection to the server
+ * @param type connection type
+ * @param server server name
+ * @param endpoint endpoint to connect to
+ * @param port CoAP port
+ * @param message message to send
+ * @param dtls_config the dtls config options
+ * @return CoAPPDU object.
+ */
+CoapPDU *create_secure_connection(uint8_t type, const char * const server, const char * const endpoint, uint16_t port, const CoapMessage * const message, dtls_config * dc);
 
 /**
  * Sends the pdu

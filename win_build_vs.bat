@@ -45,7 +45,7 @@ for %%x in (%*) do (
 	if [%%~x] EQU [/J] ( 
 	set build_JNI=ON
     )
-	if [%%~x] EQU [/C] (
+	if [%%~x] EQU [/C] ( 
 	set build_coap=ON
     )
 	if [%%~x] EQU [/64] ( 
