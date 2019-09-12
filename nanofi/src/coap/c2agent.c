@@ -1,0 +1,481 @@
+/**
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "coap/c2structs.h"
+#include "coap/c2agent.h"
+#include "coap/c2protocol.h"
+#include "coap/coapprotocol.h"
+
+#include "nanofi/coap_message.h"
+
+#include <time.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <sys/utsname.h>
+#include <sys/errno.h>
+
+#include "utlist.h"
+#include <uuid/uuid.h>
+
+#if defined(__APPLE__) && defined(__MACH__)
+#define MAC
+#include <sys/sysctl.h>
+#else
+#include <sys/sysinfo.h>
+#endif
+
+uint64_t get_physical_memory_size() {
+#ifdef MAC
+    uint64_t memsize = 0;
+    size_t len = sizeof(memsize);
+    if (sysctlbyname("hw.memsize", &memsize, &len, NULL, 0) == 0) {
+        return memsize;
+    }
+#else
+    struct sysinfo sys_info;
+    if (sysinfo(&sys_info) == 0) {
+        return sys_info.totalram;
+    }
+#endif
+    return 0;
+}
+
+uint16_t get_num_vcores() {
+#ifdef MAC
+    uint16_t num_cpus = 0;
+    size_t len = sizeof(num_cpus);
+    if (sysctlbyname("hw.logicalcpu", &num_cpus, &len, NULL, 0) == 0) {
+        return num_cpus;
+    }
+    return 0;
+#else
+    long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
+    if (ncpus < 0) {
+        return 0;
+    }
+    return (uint16_t)ncpus;
+#endif
+}
+
+char * get_ipaddr_from_hostname(const char * hostname) {
+    struct addrinfo hints, *infoptr;
+    memset(&hints, 0, sizeof(struct addrinfo));
+    hints.ai_family = AF_UNSPEC;
+
+    int result = getaddrinfo(hostname, NULL, &hints, &infoptr);
+    if (result) {
+        printf("error getting addr info getaddrinfo: %s\n", gai_strerror(result));
+        return NULL;
+    }
+
+    size_t len = 45;
+    char * host = (char *)malloc((len+1) * sizeof(char));
+    struct addrinfo *p;
+    for (p = infoptr; p != NULL; p = p->ai_next) {
+        if (getnameinfo(p->ai_addr, p->ai_addrlen, host, len, NULL, 0, NI_NUMERICHOST) == 0) {
+            freeaddrinfo(infoptr);
+            return host;
+        }
+    }
+
+    freeaddrinfo(infoptr);
+    free(host);
+    return NULL;
+}
+
+int get_machine_architecture(char * buff) {
+    if (!buff) {
+        return -1;
+    }
+    struct utsname name;
+    if (uname(&name) == 0) {
+        strcpy(buff, name.machine);
+        return 0;
+    }
+    return -1;
+}
+
+c2heartbeat_t prepare_c2_heartbeat(const char * agent_id) {
+    c2heartbeat_t c2_heartbeat;
+    memset(&c2_heartbeat, 0, sizeof(c2heartbeat_t));
+
+    if (!agent_id) {
+        c2_heartbeat.is_error = 1;
+        return c2_heartbeat;
+    }
+
+    strcpy(c2_heartbeat.agent_info.ident, agent_id);
+    c2_heartbeat.agent_info.agent_class = (char *)malloc((strlen("default") + 1) * sizeof(char));
+    strcpy(c2_heartbeat.agent_info.agent_class, "default");
+    c2_heartbeat.agent_info.uptime = time(NULL); //TODO correct me
+
+    //device_info
+    c2_heartbeat.device_info.ident = (char *)malloc((strlen("identifier") + 1) * sizeof(char));
+    strcpy(c2_heartbeat.device_info.ident, "identifier");
+    c2_heartbeat.device_info.network_info.device_id = (char *)malloc((strlen("device_id") + 1) * sizeof(char));
+    strcpy(c2_heartbeat.device_info.network_info.device_id, "device_id");
+
+    //device_info.network_info
+    size_t len = sizeof(c2_heartbeat.device_info.network_info.host_name);
+    memset(c2_heartbeat.device_info.network_info.host_name, 0, len);
+    if (gethostname(c2_heartbeat.device_info.network_info.host_name, len) < 0) {
+        strcpy(c2_heartbeat.device_info.network_info.host_name, "unknown");
+    }
+    char * ipaddr = get_ipaddr_from_hostname(c2_heartbeat.device_info.network_info.host_name);
+    if (ipaddr) {
+        strcpy(c2_heartbeat.device_info.network_info.ip_address, ipaddr);
+        free(ipaddr);
+    } else {
+        strcpy(c2_heartbeat.device_info.network_info.ip_address, "unknown");
+    }
+
+    //device_info.system_info
+    memset(c2_heartbeat.device_info.system_info.machine_arch, 0, sizeof(c2_heartbeat.device_info.system_info.machine_arch));
+    if (get_machine_architecture(c2_heartbeat.device_info.system_info.machine_arch) < 0) {
+        strcpy(c2_heartbeat.device_info.system_info.machine_arch, "-");
+    }
+    c2_heartbeat.device_info.system_info.physical_mem = get_physical_memory_size();
+    c2_heartbeat.device_info.system_info.v_cores = get_num_vcores();
+
+    return c2_heartbeat;
+}
+
+void prepare_agent_manifest(c2context_t * c2_ctx, c2heartbeat_t * hb) {
+    size_t num_ecus = 0;
+    num_ecus = HASH_COUNT(c2_ctx->ecus);
+    hb->has_ag_manifest = 1;
+    agent_manifest ag_manifest;
+    memset(&ag_manifest, 0, sizeof(agent_manifest));
+
+    UUID_FIELD uuid;
+    uuid_generate(uuid);
+    uuid_unparse_lower(uuid, ag_manifest.manifest_id);
+    strcpy(ag_manifest.agent_type, "nanofi-c");
+    strcpy(ag_manifest.version, "0.0.1");
+
+    ag_manifest.num_ecus = num_ecus;
+    ag_manifest.ecus = (ecuinfo *)malloc(num_ecus * sizeof(ecuinfo));
+    memset(ag_manifest.ecus, 0, (num_ecus * sizeof(ecuinfo)));
+
+    ecu_entry_t * el, *tmp;
+    int i = 0;
+    HASH_ITER(hh, c2_ctx->ecus, el, tmp) {
+        strcpy(ag_manifest.ecus[i].uuid, el->uuid);
+        ag_manifest.ecus[i].name = (const char *)malloc(strlen(el->ecu->name) + 1);
+        strcpy((char *)ag_manifest.ecus[i].name, el->ecu->name);
+        char * input;
+        get_input_name(el->ecu, &input);
+        if (input && strlen(input) > 0) {
+            size_t ip_len = strlen(input);
+            ag_manifest.ecus[i].input = (const char *)malloc(ip_len + 1);
+            strcpy((char *)ag_manifest.ecus[i].input, input);
+            free(input);
+        }
+        ag_manifest.ecus[i].ip_args = get_input_args(el->ecu);
+
+        char * output;
+        get_output_name(el->ecu, &output);
+        if (output && strlen(output) > 0) {
+            size_t op_len = strlen(output);
+            ag_manifest.ecus[i].output = (const char *)malloc(op_len + 1);
+            strcpy((char *)ag_manifest.ecus[i].output, output);
+            free(output);
+        }
+        ag_manifest.ecus[i].op_args = get_output_args(el->ecu);
+    }
+    hb->ag_manifest = ag_manifest;
+    hb->ag_manifest.io = get_io_manifest();
+}
+
+c2_response_t * prepare_c2_response(const char * operation_id) {
+    if (!operation_id || strlen(operation_id) == 0) {
+        return NULL;
+    }
+    c2_response_t * c2_resp = (c2_response_t *)malloc(sizeof(c2_response_t));
+    size_t len = strlen(operation_id);
+    c2_resp->ident = (char *)malloc(len + 1);
+    strcpy(c2_resp->ident, operation_id);
+    c2_resp->operation = ACKNOWLEDGE;
+    return c2_resp;
+}
+
+typedef struct {
+    char * ip_name;
+    char * op_name;
+    properties_t * ip_props;
+    properties_t * op_props;
+} io_properties;
+
+char ** parse_tokens(const char * str, size_t len, size_t num_tokens, const char * sep) {
+    char * arg = (char *)malloc(len + 1);
+    strcpy(arg, str);
+    char * tok = strtok(arg, sep);
+    char ** tokens = (char **)malloc(sizeof(char *) * num_tokens);
+    memset(tokens, 0, sizeof(char *) * num_tokens);
+    int i = 0;
+    while (tok) {
+        if (i > num_tokens) break;
+        size_t s = strlen(tok);
+        char * token = (char *)malloc(sizeof(char) * (s + 1));
+        memset(token, 0, (s + 1));
+        strcpy(token, tok);
+        tokens[i++] = token;
+        tok = strtok(NULL, sep);
+    }
+    free(arg);
+    return tokens;
+}
+
+void parse_operation_args(properties_t * entry, char ** type, char ** name, char ** key, char ** value) {
+    char ** tokens = parse_tokens(entry->key, strlen(entry->key), 3, ".");
+    *type = tokens[0];
+    *name = tokens[1];
+    *key = tokens[2];
+    size_t vl = strlen(entry->value);
+    *value = (char *)malloc(vl + 1);
+    strcpy(*value, entry->value);
+    free(tokens);
+}
+
+io_properties prepare_io_properties(properties_t * opargs) {
+    io_properties io_props;
+    memset(&io_props, 0, sizeof(io_properties));
+    properties_t * el, *tmp;
+    HASH_ITER(hh, opargs, el, tmp) {
+        char * type = NULL;
+        char * name = NULL;
+        char * key = NULL;
+        char * value = NULL;
+        parse_operation_args(el, &type, &name, &key, &value);
+        if (type && name && key && value) {
+            properties_t * prop = (properties_t *)malloc(sizeof(properties_t));
+            prop->key = key;
+            prop->value = value;
+            if (strcmp(type, "input") == 0) {
+                if (!io_props.ip_name) io_props.ip_name = name;
+                else free(name);
+                HASH_ADD_KEYPTR(hh, io_props.ip_props, prop->key, strlen(prop->key), prop);
+            } else if (strcmp(type, "output") == 0) {
+                if (!io_props.op_name) io_props.op_name = name;
+                else free(name);
+                HASH_ADD_KEYPTR(hh, io_props.op_props, prop->key, strlen(prop->key), prop);
+            } else {
+                free(name);
+                free(key);
+                free(value);
+                free(prop);
+            }
+            free(type);
+        }
+    }
+    return io_props;
+}
+
+typedef struct {
+    io_type_t ip_type;
+    io_type_t op_type;
+    properties_t * ip_props;
+    properties_t * op_props;
+} io_params;
+
+io_params get_io_params(properties_t * args) {
+    io_properties io = prepare_io_properties(args);
+    io_type_t ip_type = get_io_type(io.ip_name);
+    io_type_t op_type = get_io_type(io.op_name);
+    free(io.ip_name);
+    free(io.op_name);
+    io_params ioparams;
+    ioparams.ip_type = ip_type;
+    ioparams.op_type = op_type;
+    ioparams.ip_props = io.ip_props;
+    ioparams.op_props = io.op_props;
+    return ioparams;
+}
+
+void start(c2context_t * c2, ecu_context_t * ecu, c2_server_response_t * resp) {
+    if (c2->on_start) {
+        io_params io = get_io_params(resp->args);
+        c2->on_start(ecu, io.ip_type, io.op_type, io.ip_props, io.op_props);
+        free_properties(io.ip_props);
+        free_properties(io.op_props);
+    }
+}
+
+void stop(c2context_t * c2, ecu_context_t * ecu) {
+    if (c2->on_stop) {
+        c2->on_stop(ecu);
+    }
+}
+
+void update(c2context_t * c2, ecu_context_t * ecu, c2_server_response_t * resp) {
+    if (c2->on_update) {
+        io_params io = get_io_params(resp->args);
+        c2->on_update(ecu, io.ip_type, io.op_type, io.ip_props, io.op_props);
+        free_properties(io.ip_props);
+        free_properties(io.op_props);
+    }
+}
+
+ecu_entry_t * find_ecu(ecu_entry_t * ecus, const char * uuid) {
+    ecu_entry_t * entry = NULL;
+    HASH_FIND_STR(ecus, uuid, entry);
+    return entry;
+}
+
+void handle_c2_server_response(c2context_t * c2, c2_server_response_t * resp) {
+    if (!resp) return;
+
+    pthread_mutex_lock(&c2->ecus_lock);
+    /*ecu_entry_t * entry = find_ecu(c2->ecus, resp->operand);
+    if (!entry) {
+        pthread_mutex_unlock(&c2->ecus_lock);
+        return;
+    }*/
+    ecu_entry_t * entry = c2->ecus;
+    switch (resp->operation) {
+    case START: {
+        start(c2, entry->ecu, resp);
+        break;
+    }
+    case STOP: {
+        stop(c2, entry->ecu);
+        break;
+    }
+    case UPDATE: {
+        update(c2, entry->ecu, resp);
+        break;
+    }
+    default:
+        break;
+    }
+    pthread_mutex_unlock(&c2->ecus_lock);
+}
+
+void free_c2_responses(c2_response_t * resps) {
+    while (resps) {
+        c2_response_t * tmp = resps;
+        resps = resps->next;
+        free(tmp->ident);
+        free(tmp);
+    }
+}
+
+void free_c2_server_responses(c2_server_response_t * resps) {
+    while (resps) {
+        c2_server_response_t * tmp = resps;
+        resps = resps->next;
+        free(tmp->ident);
+        free(tmp->operand);
+        free_properties(tmp->args);
+        free(tmp);
+    }
+}
+
+void free_c2_message_context(c2_message_ctx_t * ctx) {
+    pthread_mutex_lock(&ctx->serv_resp_lock);
+    free_c2_server_responses(ctx->c2_serv_resps);
+    pthread_condattr_destroy(&ctx->serv_resp_cond_attr);
+    pthread_cond_destroy(&ctx->serv_resp_cond);
+    pthread_mutex_destroy(&ctx->serv_resp_lock);
+
+    pthread_mutex_lock(&ctx->resp_lock);
+    free_c2_responses(ctx->c2_resps);
+    pthread_condattr_destroy(&ctx->resp_cond_attr);
+    pthread_cond_destroy(&ctx->resp_cond);
+    pthread_mutex_destroy(&ctx->resp_lock);
+    free(ctx);
+}
+
+c2_message_ctx_t * create_c2_message_context() {
+    c2_message_ctx_t * msg_ctx = (c2_message_ctx_t *)malloc(sizeof(c2_message_ctx_t));
+    memset(msg_ctx, 0, sizeof(c2_message_ctx_t));
+    pthread_mutex_init(&msg_ctx->resp_lock, NULL);
+    pthread_mutex_init(&msg_ctx->serv_resp_lock, NULL);
+    pthread_condattr_init(&msg_ctx->resp_cond_attr);
+    pthread_condattr_init(&msg_ctx->serv_resp_cond_attr);
+#if defined(__APPLE__)
+    pthread_cond_init(&msg_ctx->resp_cond, NULL);
+    pthread_cond_init(&msg_ctx->serv_resp_cond, NULL);
+#else
+    pthread_cond_init(&msg_ctx->resp_cond, &msg_ctx->resp_cond_attr);
+    pthread_cond_init(&msg_ctx->serv_resp_cond, &msg_ctx->serv_resp_cond_attr);
+    pthread_condattr_setclock(&msg_ctx->resp_cond_attr, CLOCK_MONOTONIC);
+    pthread_condattr_setclock(&msg_ctx->serv_resp_cond_attr, CLOCK_MONOTONIC);
+#endif
+    return msg_ctx;
+}
+
+void enqueue_c2_serv_response(c2context_t * c2, c2_server_response_t * serv_resp) {
+    if (!c2 || !serv_resp) return;
+
+    pthread_mutex_lock(&c2->c2_msg_ctx->serv_resp_lock);
+    LL_APPEND(c2->c2_msg_ctx->c2_serv_resps, serv_resp);
+    pthread_cond_signal(&c2->c2_msg_ctx->serv_resp_cond);
+    pthread_mutex_unlock(&c2->c2_msg_ctx->serv_resp_lock);
+}
+
+c2_server_response_t * dequeue_c2_serv_response(c2context_t * c2) {
+    if (!c2) return NULL;
+
+    pthread_mutex_lock(&c2->c2_msg_ctx->serv_resp_lock);
+
+    while (!c2->c2_msg_ctx->c2_serv_resps) {
+        int ret = condition_timed_wait(&c2->c2_msg_ctx->serv_resp_cond, &c2->c2_msg_ctx->serv_resp_lock, 200);
+        if (ret == ETIMEDOUT) {
+            pthread_mutex_unlock(&c2->c2_msg_ctx->serv_resp_lock);
+            return NULL;
+        }
+    }
+
+    c2_server_response_t * head = c2->c2_msg_ctx->c2_serv_resps;
+    c2->c2_msg_ctx->c2_serv_resps = c2->c2_msg_ctx->c2_serv_resps->next;
+    head->next = NULL;
+    pthread_mutex_unlock(&c2->c2_msg_ctx->serv_resp_lock);
+    return head;
+}
+
+void enqueue_c2_resp(c2context_t * c2, c2_response_t * resp) {
+    if (!c2 || !resp) return;
+
+    pthread_mutex_lock(&c2->c2_msg_ctx->resp_lock);
+    LL_APPEND(c2->c2_msg_ctx->c2_resps, resp);
+    pthread_cond_signal(&c2->c2_msg_ctx->resp_cond);
+    pthread_mutex_unlock(&c2->c2_msg_ctx->resp_lock);
+}
+
+c2_response_t * dequeue_c2_resp(c2context_t * c2) {
+    if (!c2) return NULL;
+
+    pthread_mutex_lock(&c2->c2_msg_ctx->resp_lock);
+
+    while (!c2->c2_msg_ctx->c2_resps) {
+        int ret = condition_timed_wait(&c2->c2_msg_ctx->resp_cond, &c2->c2_msg_ctx->resp_lock, 200);
+        if (ret == ETIMEDOUT) {
+            pthread_mutex_unlock(&c2->c2_msg_ctx->resp_lock);
+            return NULL;
+        }
+    }
+
+    c2_response_t * head = c2->c2_msg_ctx->c2_resps;
+    c2->c2_msg_ctx->c2_resps = c2->c2_msg_ctx->c2_resps->next;
+    head->next = NULL;
+    pthread_mutex_unlock(&c2->c2_msg_ctx->resp_lock);
+    return head;
+}

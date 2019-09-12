@@ -23,9 +23,46 @@ IF(POLICY CMP0048)
   CMAKE_POLICY(SET CMP0048 OLD)
 ENDIF(POLICY CMP0048)
 
-include_directories(include)
-include_directories(../libminifi/include ../thirdparty/cron ../thirdparty/spdlog-20170710/include)
-include_directories(../thirdparty/ut)
+include(ExternalProject)
+
+if(MSVC)
+    set(CBOR_RESTRICT_SPECIFIER "")
+elseif(APPLE)
+    set(CBOR_RESTRICT_SPECIFIER "restrict")
+else()
+    set(CBOR_RESTRICT_SPECIFIER "__restrict__")
+endif()
+
+ExternalProject_Add(
+    libcbor-external
+    GIT_REPOSITORY "https://github.com/PJK/libcbor.git"
+    GIT_TAG "82512d851205fbc7f65d96a0b4a8e1bad2e4f3c6"
+    SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/libcbor-src"
+    BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/libcbor-build"
+    INSTALL_COMMAND ${CMAKE_COMMAND}  -E echo "Skipping install step."
+)
+add_definitions("-Drestrict=${CBOR_RESTRICT_SPECIFIER}")
+
+ExternalProject_Get_Property(libcbor-external binary_dir)
+ExternalProject_Get_Property(libcbor-external source_dir)
+
+set(cbor-binary_dir "${binary_dir}")
+set(cbor-source_dir "${source_dir}")
+
+set(BYPRODUCT "${cbor-binary_dir}/src/libcbor.a")
+
+add_library(cbor STATIC IMPORTED)
+set_target_properties(cbor PROPERTIES IMPORTED_LOCATION ${BYPRODUCT})
+add_dependencies(cbor libcbor-external)
+set(CBOR_FOUND "YES" CACHE STRING "" FORCE)
+set(CBOR_INCLUDE_DIRS "${cbor-binary_dir}" "${cbor-source_dir}/src" CACHE STRING "" FORCE)
+set(CBOR_LIBRARY cbor CACHE STRING "" FORCE)
+
+include_directories(${CMAKE_SOURCE_DIR}/nanofi/include)
+include_directories(${CMAKE_SOURCE_DIR}/libminifi/include ${CMAKE_SOURCE_DIR}/thirdparty/cron ${CMAKE_SOURCE_DIR}/thirdparty/spdlog-20170710/include ${CMAKE_BINARY_DIR}/extensions/coap/thirdparty/libcoap-src/include)
+include_directories(${CMAKE_SOURCE_DIR}/thirdparty/ut)
+include_directories(${CMAKE_SOURCE_DIR}/extensions/coap)
+include_directories(${CBOR_INCLUDE_DIRS})
 
 if(WIN32)
 include_directories(../libminifi/opsys/win)
@@ -33,22 +70,20 @@ else()
 include_directories(../libminifi/opsys/posix)
 endif()
 
-file(GLOB NANOFI_SOURCES "src/api/*.c*" "src/core/*.c*" "src/cxx/*.cpp" "src/sitetosite/*.c*")
+file(GLOB NANOFI_SOURCES  "src/api/*.c*" "src/core/*.c*" "src/cxx/*.cpp" "src/sitetosite/*.c*" "src/coap/*.c*" "src/ecu_api/*.c*" "src/processors/*.c*" "src/c2_api/*.c*")
 
 if(WIN32)
 list(REMOVE_ITEM NANOFI_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/api/ecu.c ${CMAKE_CURRENT_SOURCE_DIR}/src/core/file_utils.c ${CMAKE_CURRENT_SOURCE_DIR}/src/core/flowfiles.c)
 endif()
 
-file(GLOB NANOFI_ECU_SOURCES "ecu/*.c")
-
 include(CheckCXXCompilerFlag)
 if (WIN32)
   if ((MSVC_VERSION GREATER "1900") OR (MSVC_VERSION EQUAL "1900"))
-	    CHECK_CXX_COMPILER_FLAG("/std:c++14" _cpp_latest_flag_supported)
-	    if (_cpp_latest_flag_supported)
-	        add_compile_options("/std:c++14")
-	    endif()
-	endif()
+      CHECK_CXX_COMPILER_FLAG("/std:c++14" _cpp_latest_flag_supported)
+        if (_cpp_latest_flag_supported)
+            add_compile_options("/std:c++14")
+        endif()
+  endif()
 else()
 
 CHECK_CXX_COMPILER_FLAG("-std=c++11" COMPILER_SUPPORTS_CXX11)
@@ -65,20 +100,22 @@ endif()
 
 add_library(nanofi STATIC ${NANOFI_SOURCES})
 
+add_dependencies(nanofi nanofi-coap-c)
+
 if (APPLE)
-	target_link_libraries (nanofi -Wl,-all_load core-minifi minifi minifi-standard-processors)
+    target_link_libraries (nanofi -Wl,-all_load core-minifi minifi minifi-standard-processors nanofi-coap-c ${CBOR_LIBRARY})
 elseif(NOT WIN32)
-	target_link_libraries (nanofi -Wl,--whole-archive core-minifi minifi minifi-standard-processors -Wl,--no-whole-archive)
+    target_link_libraries (nanofi -Wl,--whole-archive core-minifi minifi minifi-standard-processors -Wl,--no-whole-archive nanofi-coap-c ${CBOR_LIBRARY})
 else()
     set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:core-minifi")
-	set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:minifi")
-	set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:minifi-standard-processors")
+    set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:minifi")
+    set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:minifi-standard-processors")
 endif ()
 
 add_dependencies(nanofi minifi-standard-processors)
 
 if(WIN32)
-	set_target_properties(nanofi PROPERTIES LINK_FLAGS "${WIN32_ARCHIVES}")
+    set_target_properties(nanofi PROPERTIES LINK_FLAGS "${WIN32_ARCHIVES}")
 endif()
 
 if (ENABLE_PYTHON AND NOT STATIC_BUILD)
@@ -86,19 +123,19 @@ if (ENABLE_PYTHON AND NOT STATIC_BUILD)
 add_library(nanofi-shared SHARED ${NANOFI_SOURCES})
 
 if (APPLE)
-	target_link_libraries (nanofi-shared -Wl,-all_load core-minifi-shared minifi-shared minifi-standard-processors)
+    target_link_libraries (nanofi-shared -Wl,-all_load core-minifi-shared minifi-shared minifi-standard-processors nanofi-coap-c ${CBOR_LIBRARY})
 elseif(NOT WIN32)
-	target_link_libraries (nanofi-shared -Wl,--whole-archive core-minifi-shared minifi-shared  minifi-standard-processors -Wl,--no-whole-archive)
+    target_link_libraries (nanofi-shared -Wl,--whole-archive core-minifi-shared minifi-shared  minifi-standard-processors -Wl,--no-whole-archive nanofi-coap-c ${CBOR_LIBRARY})
 else()
     set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:core-minifi-shared")
-	set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:minifi-shared")
-	set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:minifi-standard-processors")
+    set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:minifi-shared")
+    set(WIN32_ARCHIVES "${WIN32_ARCHIVES} /WHOLEARCHIVE:minifi-standard-processors")
 endif ()
 
 add_dependencies(nanofi-shared minifi-standard-processors)
 
 if(WIN32)
-	set_target_properties(nanofi-shared PROPERTIES LINK_FLAGS "${WIN32_ARCHIVES}")
+    set_target_properties(nanofi-shared PROPERTIES LINK_FLAGS "${WIN32_ARCHIVES}")
 endif()
 
 set_property(TARGET nanofi-shared PROPERTY POSITION_INDEPENDENT_CODE ON)

@@ -263,7 +263,6 @@ include_directories(thirdparty/ut)
 set(UUID_FOUND "YES" CACHE STRING "" FORCE)
 set(UUID_LIBRARIES "uuid" CACHE STRING "" FORCE)
 
-
 if (DISABLE_CURL)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DDISABLE_CURL")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DDISABLE_CURL")
@@ -273,7 +272,6 @@ if(NOT DISABLE_CURL)
 
   set(CURL_C_FLAGS "${CMAKE_C_FLAGS}")
   set(CURL_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-
 
 get_property(LIB64 GLOBAL PROPERTY FIND_LIBRARY_USE_LIB64_PATHS)
 
@@ -469,7 +467,7 @@ if (ENABLE_ALL OR ENABLE_GPS)
 	createExtension(GPS-EXTENSION "GPS EXTENSIONS" "Enables LibGPS Functionality and the GetGPS processor." "extensions/gps" "${TEST_DIR}/gps-tests")
 endif()
 
-option(ENABLE_COAP "Enables the CoAP extension." OFF)
+option(ENABLE_COAP "Enables the CoAP extension." ON)
 if (ENABLE_ALL OR ENABLE_COAP STREQUAL "ON")
 	createExtension(COAP-EXTENSION "COAP EXTENSIONS" "Enables LibCOAP Functionality." "extensions/coap" "extensions/coap/tests/")
 	if( NOT DISABLE_CURL)

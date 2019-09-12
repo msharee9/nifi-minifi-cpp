@@ -25,6 +25,7 @@ CoapServerContext * const create_server(const char * const server_hostname, cons
   memset(server, 0x00, sizeof(CoapServerContext));
   if (create_endpoint_context(&server->ctx, server_hostname, port)) {
     free_server(server);
+    return NULL;
   }
 
   return server;

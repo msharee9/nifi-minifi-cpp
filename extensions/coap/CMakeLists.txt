@@ -33,15 +33,15 @@ if(CMAKE_THREAD_LIBS_INIT)
   target_link_libraries(minifi-coap "${CMAKE_THREAD_LIBS_INIT}")
 endif()
 
-  set(BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}/extensions/coap")
+  set(BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
   # determine version of GNUTLSs
-  set(BYPRODUCT "${BASE_DIR}/extensions/coap/thirdparty/libcoap-src/.libs/libcoap-2.a")
-  set(DIR "${BASE_DIR}/extensions/coap/thirdparty/libcoap-src")
+  set(BYPRODUCT "${BASE_DIR}/thirdparty/libcoap-src/.libs/libcoap-2.a")
+  set(DIR "${BASE_DIR}/thirdparty/libcoap-src")
   ExternalProject_Add(
     coap-external
     GIT_REPOSITORY "https://github.com/obgm/libcoap.git"
-    GIT_TAG "00486a4f46e0278dd24a8ff3411416ff420cde29" 
-    PREFIX "${BASE_DIR}/extensions/coap/thirdparty/libcoap"
+    GIT_TAG "00486a4f46e0278dd24a8ff3411416ff420cde29"
+    PREFIX "${BASE_DIR}/thirdparty/libcoap"
     BUILD_IN_SOURCE true
     SOURCE_DIR "${DIR}"
     BUILD_COMMAND make
@@ -86,4 +86,3 @@ endif ()
 
 SET (COAP-EXTENSION minifi-coap PARENT_SCOPE)
 register_extension(minifi-coap)
-
