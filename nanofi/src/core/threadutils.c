@@ -24,7 +24,7 @@ int create_thread(thread_handle_t * hnd, thread_proc_t tproc, void * args) {
 	}
 
 #ifndef WIN32
-	if (pthread_create(&hnd->thread, NULL, &tproc.threadfunc, args) != 0) {
+	if (pthread_create(&hnd->thread, NULL, tproc.threadfunc, args) != 0) {
 		return -1;
 	}
 #else
@@ -41,7 +41,7 @@ int create_thread(thread_handle_t * hnd, thread_proc_t tproc, void * args) {
 void wait_thread_complete(thread_handle_t * hnd) {
 	assert(hnd != NULL);
 #ifndef WIN32
-	pthread_join(&hnd->thread, NULL);
+	pthread_join(hnd->thread, NULL);
 #else
 	WaitForSingleObject((void *)(&hnd->thread), INFINITE);
 #endif

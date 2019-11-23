@@ -23,11 +23,10 @@ include_directories(protocols nanofi controllerservice server)
 include_directories(../http-curl/)
 
 file(GLOB CSOURCES "nanofi/*.c")
-file(GLOB SOURCES "*.cpp" "protocols/*.cpp" "processors/*.cpp" "controllerservice/*.cpp" "server/*.cpp" )
+file(GLOB SOURCES "*.cpp" "protocols/*.cpp" "controllerservice/*.cpp" "server/*.cpp" )
 
 set(BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 set(DIR "${BASE_DIR}/thirdparty/libcoap-src")
-
 add_library(minifi-coap STATIC ${SOURCES})
 
 if (NOT WIN32)
@@ -50,6 +49,12 @@ if (NOT WIN32)
     EXCLUDE_FROM_ALL TRUE
     )
     add_definitions("-DWITH_POSIX=1")
+    add_library(coap STATIC IMPORTED)
+	set_target_properties(coap PROPERTIES IMPORTED_LOCATION "${BYPRODUCT}")
+	add_dependencies(coap coap-external)
+	set(COAP_FOUND "YES" CACHE STRING "" FORCE)
+	set(COAP_INCLUDE_DIRS "${DIR}/include" CACHE STRING "" FORCE)
+	include_directories(${COAP_INCLUDE_DIRS})
 else()
     configure_file(DownloadCoapCMakeLists.txt.in "${CMAKE_CURRENT_BINARY_DIR}/coap_download/CMakeLists.txt" @ONLY)
     file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/libcoap_windows.patch" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/coap_download")
@@ -71,15 +76,14 @@ else()
     target_include_directories(coap PUBLIC "${COAP_SOURCE_DIR}/include/coap2")
 
 endif()
- 
 set(COAP_LIBRARIES coap CACHE STRING "" FORCE)
 
 add_library(nanofi-coap-c STATIC ${CSOURCES})
 add_dependencies(minifi-coap nanofi-coap-c)
 add_dependencies(nanofi-coap-c coap)
 target_link_libraries(nanofi-coap-c PUBLIC ${COAP_LIBRARIES} ${CMAKE_DL_LIBS})
+target_link_libraries(minifi-coap PUBLIC nanofi-coap-c PRIVATE ${CMAKE_DL_LIBS})
 
-target_link_libraries (minifi-coap PUBLIC nanofi-coap-c PRIVATE ${CMAKE_DL_LIBS})
 if(CMAKE_THREAD_LIBS_INIT)
     target_link_libraries(minifi-coap PUBLIC "${CMAKE_THREAD_LIBS_INIT}")
 endif()

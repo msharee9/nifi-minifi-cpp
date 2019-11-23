@@ -41,7 +41,7 @@ typedef struct thread_handle {
 } thread_handle_t;
 
 #ifndef WIN32
-typedef (void *)(*pthread_proc_type)(void *);
+typedef void*(*pthread_proc_type)(void *);
 #endif
 
 typedef struct thread_proc {
@@ -59,5 +59,4 @@ void thread_sleep_ms(uint64_t millis);
 #ifdef __cplusplus
 }
 #endif
-
 #endif /* THREADUTILS_H_ */

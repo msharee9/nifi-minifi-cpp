@@ -34,9 +34,8 @@ void start_s2s_output(site2site_output_context_t * ctx) {
 void free_s2s_output_context(site2site_output_context_t * ctx) {
     free_properties(ctx->output_properties);
     free(ctx->host_name);
-    if (ctx->client) {
-        destroyClient(ctx->client);
-    }
+    destroyClient(ctx->client);
+    free(ctx->client);
     destroy_lock(&ctx->client_mutex);
     destroy_lock(&ctx->stop_mutex);
     destroy_cv(&ctx->stop_cond);

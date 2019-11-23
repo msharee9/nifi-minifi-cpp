@@ -32,7 +32,9 @@ message_queue_t * create_msg_queue(uint64_t capacity_bytes) {
 #ifndef WIN32
 	initialize_cvattr(&mq->wrt_notify_attr);
 	initialize_cv(&mq->write_notify, &mq->wrt_notify_attr);
+#ifndef __APPLE__
 	condition_attr_set_clock(&mq->wrt_notify_attr, CLOCK_MONOTONIC);
+#endif
 #else
     initialize_cv(&mq->write_notify, NULL);
 #endif

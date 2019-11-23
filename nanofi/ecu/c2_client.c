@@ -44,8 +44,8 @@ struct config_params * read_configuration_file(const char * file_path) {
 
     struct config_params * params = NULL;
     FILE * fp = fopen(file_path, "r");
-    char * line;
-    size_t size;
+    char * line = NULL;
+    size_t size = 0;
     ssize_t read;
     if (!fp) {
         printf("Cannot open file %s\n", file_path);

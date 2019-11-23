@@ -487,7 +487,7 @@ c2_message_ctx_t * create_c2_message_context() {
 #else
     initialize_cvattr(&msg_ctx->resp_cond_attr);
     initialize_cvattr(&msg_ctx->serv_resp_cond_attr);
-    initializa_cv(&msg_ctx->resp_cond, &msg_ctx->resp_cond_attr);
+    initialize_cv(&msg_ctx->resp_cond, &msg_ctx->resp_cond_attr);
     initialize_cv(&msg_ctx->serv_resp_cond, &msg_ctx->serv_resp_cond_attr);
     condition_attr_set_clock(&msg_ctx->resp_cond_attr, CLOCK_MONOTONIC);
     condition_attr_set_clock(&msg_ctx->serv_resp_cond_attr, CLOCK_MONOTONIC);

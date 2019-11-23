@@ -32,10 +32,12 @@ void initialize_lock(lock_t * lock) {
 #ifndef WIN32
 void initialize_cvattr(conditionvariable_attr_t * cv_attr) {
 	assert(cv_attr != NULL);
-	pthread_condattr_init(cv_attr->cv_attr);
+	pthread_condattr_init(&cv_attr->cv_attr);
 	cv_attr->initialized = 1;
 }
+#endif
 
+#if !defined(_WIN32) && !defined(__APPLE__)
 void condition_attr_set_clock(conditionvariable_attr_t * cv_attr, clockid_t clock) {
 	assert(cv_attr != NULL);
 	pthread_condattr_setclock(&cv_attr->cv_attr, clock);
@@ -45,7 +47,7 @@ void condition_attr_set_clock(conditionvariable_attr_t * cv_attr, clockid_t cloc
 void initialize_cv(conditionvariable_t * cv, conditionvariable_attr_t * cv_attr) {
 	assert(cv != NULL);
 #ifndef WIN32
-	if (cv_attr && cv_attr->initiliazed) {
+	if (cv_attr && cv_attr->initialized) {
 		pthread_cond_init(&cv->cv, &cv_attr->cv_attr);
 	}
 	else {

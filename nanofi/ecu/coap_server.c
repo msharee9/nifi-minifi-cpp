@@ -119,9 +119,13 @@ void stop_coap_server() {
 
 }
 int main(int argc, char ** argv) {
-    //initialize_coap();
+
+	if (argc < 3) {
+		printf("Usage:./coap_server <listen ip> <port>\n");
+		return 0;
+	}
     little_endian = is_little_endian();
-    CoapServerContext * coapctx = create_server("192.168.1.158", "5683");
+    CoapServerContext * coapctx = create_server(argv[1], argv[2]);
     CoapEndpoint * endpoint = create_endpoint(coapctx, "heartbeat", COAP_REQUEST_POST, handle_heartbeat_post_request);
     create_endpoint(coapctx, "acknowledge", COAP_REQUEST_POST, handle_acknowledge_post_request);
     create_endpoint(coapctx, "c2operation", COAP_REQUEST_POST, handle_c2_post_request);
