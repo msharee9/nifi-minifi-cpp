@@ -15,39 +15,44 @@
  * limitations under the License.
 */
 
+#ifndef WIN32
 #include <unistd.h>
+#endif
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <processors/file_input.h>
 
 void initialize_file_input(file_input_context_t * ctx) {
-    pthread_mutex_init(&ctx->stop_mutex, NULL);
-    pthread_cond_init(&ctx->stop_cond, NULL);
+    initialize_lock(&ctx->stop_mutex);
+    initialize_cv(&ctx->stop_cond, NULL);
 }
 
 void start_file_input(file_input_context_t * ctx) {
-    pthread_mutex_lock(&ctx->stop_mutex);
+    acquire_lock(&ctx->stop_mutex);
     ctx->stop = 0;
-    pthread_mutex_unlock(&ctx->stop_mutex);
+    release_lock(&ctx->stop_mutex);
 }
 
 void stop_file_input(file_input_context_t * ctx) {
-    pthread_mutex_lock(&ctx->stop_mutex);
+	acquire_lock(&ctx->stop_mutex);
     ctx->stop = 1;
-    pthread_cond_broadcast(&ctx->stop_cond);
-    pthread_mutex_unlock(&ctx->stop_mutex);
+    condition_variable_broadcast(&ctx->stop_cond);
+    release_lock(&ctx->stop_mutex);
 }
 
+#ifndef WIN32
 int validate_file_path(const char * file_path) {
     if (!file_path) {
         return -1;
     }
-    struct stat stats;
-    int ret = stat(file_path, &stats);
+
+	struct stat stats;
+	int ret = stat(file_path, &stats);
 
     if (ret == -1) {
         printf("Error occurred while getting file status {file: %s, error: %s}\n", file_path, strerror(errno));
@@ -60,6 +65,25 @@ int validate_file_path(const char * file_path) {
     }
     return 0;
 }
+#else
+int validate_file_path(const char * file_path) {
+    if (!file_path) {
+        return -1;
+    }
+    HANDLE hFind;
+    WIN32_FIND_DATA fd;
+
+    hFind = FindFirstFile(file_path, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+
+    if (fd.dwFileAttributes == FILE_ATTRIBUTE_DIRECTORY) {
+        return -1;
+    }
+    return 0;
+}
+#endif
 
 int validate_file_delimiter(const char * delimiter_str, char * delim) {
     if (!delimiter_str || strlen(delimiter_str) == 0) {
@@ -299,13 +323,13 @@ file_input_context_t * create_file_input_context() {
 
 task_state_t file_reader_processor(void * args, void * state) {
     file_input_context_t * ctx = (file_input_context_t *)args;
-    pthread_mutex_lock(&ctx->msg_queue->queue_lock);
+    acquire_lock(&ctx->msg_queue->queue_lock);
     if (ctx->msg_queue->stop) {
         stop_file_input(ctx);
-        pthread_mutex_unlock(&ctx->msg_queue->queue_lock);
+        release_lock(&ctx->msg_queue->queue_lock);
         return DONOT_RUN_AGAIN;
     }
-    pthread_mutex_unlock(&ctx->msg_queue->queue_lock);
+	release_lock(&ctx->msg_queue->queue_lock);
 
     if (ctx->chunk_size > 0) {
         read_file_chunk(ctx);
@@ -324,17 +348,17 @@ void free_file_input_properties(file_input_context_t * ctx) {
 void free_file_input_context(file_input_context_t * ctx) {
     free_properties(ctx->input_properties);
     free(ctx->file_path);
-    pthread_mutex_destroy(&ctx->stop_mutex);
-    pthread_cond_destroy(&ctx->stop_cond);
+    destroy_lock(&ctx->stop_mutex);
+    destroy_cv(&ctx->stop_cond);
     free(ctx);
 }
 
 void wait_file_input_stop(file_input_context_t * ctx) {
-    pthread_mutex_lock(&ctx->stop_mutex);
+    acquire_lock(&ctx->stop_mutex);
     while (!ctx->stop) {
-        pthread_cond_wait(&ctx->stop_cond, &ctx->stop_mutex);
+        condition_variable_wait(&ctx->stop_cond, &ctx->stop_mutex);
     }
-    pthread_mutex_unlock(&ctx->stop_mutex);
+	release_lock(&ctx->stop_mutex);
 }
 
 void set_file_params(file_input_context_t * f_ctx,

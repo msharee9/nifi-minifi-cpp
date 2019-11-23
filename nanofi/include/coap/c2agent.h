@@ -23,12 +23,9 @@
 extern "C" {
 #endif
 
-#include <time.h>
-#include <pthread.h>
-
-#include <c2_api/c2api.h>
-#include "c2protocol.h"
 #include "c2structs.h"
+#include "c2protocol.h"
+#include <c2_api/c2api.h>
 
 c2heartbeat_t prepare_c2_heartbeat(const char * agent_id);
 void prepare_agent_manifest(c2context_t * c2_ctx, c2heartbeat_t * hb);

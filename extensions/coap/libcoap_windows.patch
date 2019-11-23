@@ -1,0 +1,13 @@
+diff --git a/coap_config.h.windows b/coap_config.h.windows
+index dbbe509..c281161 100644
+--- a/coap_config.h.windows
++++ b/coap_config.h.windows
+@@ -67,7 +67,7 @@
+ #define snprintf _snprintf
+ #endif
+
+-#define HAVE_OPENSSL 1
++//#define HAVE_OPENSSL 1
+
+ /* Define to the address where bug reports for this package should be sent. */
+ #define PACKAGE_BUGREPORT "libcoap-developers@lists.sourceforge.net"

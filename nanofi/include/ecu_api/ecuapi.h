@@ -22,10 +22,10 @@
 extern "C" {
 #endif
 
-#include "uthash.h"
+#include <coap/c2structs.h>
 #include <core/threadpool.h>
 #include <core/message_queue.h>
-#include <coap/c2structs.h>
+#include "uthash.h"
 
 typedef enum io_type {
     SITE2SITE,
@@ -49,7 +49,7 @@ typedef struct ecu_context {
     threadpool_t * thread_pool;
     message_queue_t * msg_queue;
     int started;
-    pthread_mutex_t ctx_lock;
+    lock_t ctx_lock;
 } ecu_context_t;
 
 typedef int (*on_start_callback_t)(ecu_context_t * ecu_ctx, io_type_t input, io_type_t output, properties_t * input_props, properties_t * output_props);

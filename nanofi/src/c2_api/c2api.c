@@ -17,9 +17,8 @@
 
 #include "uthash.h"
 #include <string.h>
-#include <time.h>
 #include <errno.h>
-#include <uuid/uuid.h>
+#include <core/cuuid.h>
 #include <processors/c2_heartbeat.h>
 #include <processors/c2_consumer.h>
 #include <coap/coapprotocol.h>
@@ -50,12 +49,12 @@ c2context_t * create_c2_agent(const char * c2host, const char * c2port) {
     c2_ctx->heartbeat_uri = (char *)malloc(strlen(hb) + 1);
     strcpy((char *)c2_ctx->heartbeat_uri, hb);
 
-    pthread_mutex_init(&c2_ctx->ecus_lock, NULL);
+    initialize_lock(&c2_ctx->ecus_lock);
     c2_ctx->c2_msg_ctx = create_c2_message_context();
 
-    pthread_mutex_init(&c2_ctx->c2_lock, NULL);
-    pthread_cond_init(&c2_ctx->consumer_stop_notify, NULL);
-    pthread_cond_init(&c2_ctx->hb_stop_notify, NULL);
+	initialize_lock(&c2_ctx->c2_lock);
+    initialize_cv(&c2_ctx->consumer_stop_notify, NULL);
+	initialize_cv(&c2_ctx->hb_stop_notify, NULL);
     c2_ctx->is_little_endian = is_little_endian();
     initialize_coap(c2_ctx);
     return c2_ctx;
@@ -64,7 +63,7 @@ c2context_t * create_c2_agent(const char * c2host, const char * c2port) {
 void register_ecu(ecu_context_t * ecu, c2context_t * c2) {
     if (!c2 || !ecu) return;
 
-    pthread_mutex_lock(&c2->ecus_lock);
+    acquire_lock(&c2->ecus_lock);
     ecu_entry_t * el, *tmp;
     HASH_ITER(hh, c2->ecus, el, tmp) {
         HASH_DEL(c2->ecus, el);
@@ -74,33 +73,34 @@ void register_ecu(ecu_context_t * ecu, c2context_t * c2) {
     strcpy(entry->uuid, ecu->uuid);
     entry->ecu = ecu;
     HASH_ADD_STR(c2->ecus, uuid, entry);
-    pthread_mutex_unlock(&c2->ecus_lock);
+    release_lock(&c2->ecus_lock);
 }
 
 int start_c2_agent(c2context_t * c2) {
-    pthread_mutex_lock(&c2->c2_lock);
+    acquire_lock(&c2->c2_lock);
     if (c2->started) {
-        pthread_mutex_unlock(&c2->c2_lock);
+        release_lock(&c2->c2_lock);
         return -1;
     }
 
     if (c2->shuttingdown) {
-        pthread_mutex_unlock(&c2->c2_lock);
+        release_lock(&c2->c2_lock);
         return -1;
     }
 
     if (!c2->thread_pool) {
         threadpool_t * pool = threadpool_create(2);
         if (!pool) {
-            pthread_mutex_unlock(&c2->c2_lock);
+            release_lock(&c2->c2_lock);
             return -1;
         }
         c2->thread_pool = pool;
     }
 
-    UUID_FIELD uuid;
-    uuid_generate(uuid);
-    uuid_unparse_lower(uuid, c2->agent_uuid);
+    CIDGenerator gen;
+    gen.implementation_ = CUUID_DEFAULT_IMPL;
+    generate_uuid(&gen, c2->agent_uuid);
+    c2->agent_uuid[36] = '\0';
 
     task_node_t * heartbeat_task = create_repeatable_task(&c2_heartbeat_sender, c2, NULL, 500);
     task_node_t * c2handler_task = create_repeatable_task(&c2_consumer, c2, NULL, 200);
@@ -111,28 +111,28 @@ int start_c2_agent(c2context_t * c2) {
     c2->shuttingdown = 0;
     c2->hb_stop = 0;
     c2->c2_consumer_stop = 0;
-    pthread_mutex_unlock(&c2->c2_lock);
+    release_lock(&c2->c2_lock);
     return 0;
 }
 
 void wait_tasks_complete(c2context_t * c2) {
-    pthread_mutex_lock(&c2->c2_lock);
+    acquire_lock(&c2->c2_lock);
 
     while (!c2->hb_stop) {
-        pthread_cond_wait(&c2->hb_stop_notify, &c2->c2_lock);
+        condition_variable_wait(&c2->hb_stop_notify, &c2->c2_lock);
     }
 
     while (!c2->c2_consumer_stop) {
-        pthread_cond_wait(&c2->consumer_stop_notify, &c2->c2_lock);
+        condition_variable_wait(&c2->consumer_stop_notify, &c2->c2_lock);
     }
-    pthread_mutex_unlock(&c2->c2_lock);
+    release_lock(&c2->c2_lock);
 }
 
 void stop_c2_agent(c2context_t * c2) {
-    pthread_mutex_lock(&c2->c2_lock);
+    acquire_lock(&c2->c2_lock);
     c2->started = 0;
     c2->shuttingdown = 1;
-    pthread_mutex_unlock(&c2->c2_lock);
+    release_lock(&c2->c2_lock);
 
     wait_tasks_complete(c2);
     threadpool_shutdown(c2->thread_pool);
@@ -170,11 +170,11 @@ void destroy_c2_context(c2context_t * c2) {
         HASH_DEL(c2->ecus, el);
         free(el);
     }
-    pthread_mutex_lock(&c2->ecus_lock);
-    pthread_mutex_destroy(&c2->ecus_lock);
-    pthread_mutex_lock(&c2->c2_lock);
-    pthread_cond_destroy(&c2->hb_stop_notify);
-    pthread_cond_destroy(&c2->consumer_stop_notify);
-    pthread_mutex_destroy(&c2->c2_lock);
+    acquire_lock(&c2->ecus_lock);
+    destroy_lock(&c2->ecus_lock);
+    acquire_lock(&c2->c2_lock);
+    destroy_cv(&c2->hb_stop_notify);
+    destroy_cv(&c2->consumer_stop_notify);
+    destroy_lock(&c2->c2_lock);
     free(c2);
 }

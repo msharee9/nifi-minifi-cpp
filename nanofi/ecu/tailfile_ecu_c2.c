@@ -15,7 +15,9 @@
  * limitations under the License.
 */
 
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <stdio.h>
 #include <signal.h>
 #include <ecu_api/ecuapi.h>
@@ -31,11 +33,16 @@ void ecu_signal_handler(int signum) {
 }
 
 void setup_ecu_signal_action() {
+#ifdef _WIN32
+    signal(SIGINT, ecu_signal_handler);
+    signal(SIGTERM, ecu_signal_handler);
+#else
     struct sigaction action;
     memset(&action, 0, sizeof(sigaction));
     action.sa_handler = ecu_signal_handler;
     sigaction(SIGTERM, &action, NULL);
     sigaction(SIGINT, &action, NULL);
+#endif
 }
 
 int main(int argc, char ** argv) {
@@ -63,9 +70,14 @@ int main(int argc, char ** argv) {
     }
 
     while (!stop_ecu) {
+#ifndef WIN32
         sleep(1);
+#else
+        Sleep(1000);
+#endif
     }
 
     destroy_c2_context(c2);
     destroy_ecu(ecu);
+    printf("destroyed c2 context\n");
 }
