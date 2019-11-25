@@ -41,13 +41,16 @@ add_executable(tailfile_delimited tailfile_delimited.c)
 
 target_link_libraries(tailfile_delimited nanofi ${CMAKE_THREAD_LIBS_INIT}  ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
 
-#add_executable(coap_server dummy_coap_server.c)
-#target_link_libraries(coap_server nanofi ${CMAKE_THREAD_LIBS_INIT}  ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
-
-#add_executable(c2_client c2_client.c)
-#target_link_libraries(c2_client nanofi ${CMAKE_THREAD_LIBS_INIT}  ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
+endif()
 
 add_executable(tailfile_ecu_c2 tailfile_ecu_c2.c)
-target_link_libraries(tailfile_ecu_c2 nanofi ${CMAKE_THREAD_LIBS_INIT}  ${LINK_FLAGS} minifi-http-curl ${LINK_END_FLAGS})
+add_dependencies(tailfile_ecu_c2 nanofi)
+target_link_libraries(tailfile_ecu_c2 PRIVATE nanofi)
 
-endif()
+add_executable(coap_server coap_server.c)
+add_dependencies(coap_server nanofi)
+target_link_libraries(coap_server PUBLIC nanofi)
+
+add_executable(c2_client c2_client.c)
+add_dependencies(c2_client nanofi)
+target_link_libraries(c2_client PRIVATE nanofi)

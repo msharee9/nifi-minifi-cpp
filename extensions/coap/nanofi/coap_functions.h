@@ -22,6 +22,12 @@
 extern "C" {
 #endif
 
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#endif
 
 typedef unsigned char method_t;
 
@@ -29,13 +35,8 @@ typedef unsigned char method_t;
 #include "coap2/uri.h"
 #include "coap2/address.h"
 #include <stdio.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <string.h>
-#include <netdb.h>
 #include "coap_message.h"
-
 
 typedef struct {
   void (*data_received)(void *receiver_context, struct coap_context_t *ctx, CoapMessage *const);

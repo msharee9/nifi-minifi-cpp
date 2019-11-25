@@ -16,12 +16,12 @@
  * limitations under the License.
  */
 
-#include <pthread.h>
 #include <string.h>
 
 #include "coap/c2structs.h"
 #include "coap/coapprotocol.h"
 
+#include <core/synchutils.h>
 #include <nanofi/coap_connection.h>
 #include <nanofi/coap_functions.h>
 
@@ -29,7 +29,7 @@ void insert_coap_message(c2context_t * c2, const struct coap_context_t * ctx, co
     if (!ctx || !message) {
         return;
     }
-    pthread_mutex_lock(&c2->coap_msgs_lock);
+    acquire_lock(&c2->coap_msgs_lock);
     struct coap_messages * cm = NULL;
     HASH_FIND_PTR(c2->messages, &ctx, cm);
     if (cm) {
@@ -47,14 +47,14 @@ void insert_coap_message(c2context_t * c2, const struct coap_context_t * ctx, co
     memcpy(cm->coap_msg.data, message->data, message->length);
     free(message->data);
     HASH_ADD_PTR(c2->messages, ctx, cm);
-    pthread_mutex_unlock(&c2->coap_msgs_lock);
+    release_lock(&c2->coap_msgs_lock);
 }
 
 struct coap_message * get_coap_message(c2context_t * c2, const struct coap_context_t * ctx) {
     if (!ctx) {
         return NULL;
     }
-    pthread_mutex_lock(&c2->coap_msgs_lock);
+    acquire_lock(&c2->coap_msgs_lock);
     struct coap_messages * cm = NULL;
     HASH_FIND_PTR(c2->messages, &ctx, cm);
     struct coap_message * msg = NULL;
@@ -72,7 +72,7 @@ struct coap_message * get_coap_message(c2context_t * c2, const struct coap_conte
             free(cm);
         }
     }
-    pthread_mutex_unlock(&c2->coap_msgs_lock);
+    release_lock(&c2->coap_msgs_lock);
     return msg;
 }
 
@@ -95,6 +95,7 @@ void initialize_coap(c2context_t * c2_ctx) {
     callback_pointers cbs;
     cbs.data_received = receive_message;
     cbs.received_error = receive_error;
+    initialize_lock(&c2_ctx->coap_msgs_lock);
     init_coap_api((void *)c2_ctx, &cbs);
 }
 

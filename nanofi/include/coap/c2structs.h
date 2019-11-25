@@ -23,12 +23,12 @@
 extern "C" {
 #endif
 
+#include <core/synchutils.h>
+#include <core/cstructs.h>
 #include <stdint.h>
 #include <limits.h>
 #include <stddef.h>
 #include <uthash.h>
-#include <pthread.h>
-#include <core/cstructs.h>
 
 typedef struct systeminfo {
     char machine_arch[256];
@@ -38,7 +38,7 @@ typedef struct systeminfo {
 
 typedef struct networkinfo {
     char * device_id;
-    char host_name[_POSIX_HOST_NAME_MAX + 1];
+    char host_name[256];
     char ip_address[46];
 } networkinfo;
 
@@ -156,15 +156,15 @@ typedef struct c2_response {
 typedef struct c2_message_ctx {
     //responses to heartbeat from c2 server
     c2_server_response_t * c2_serv_resps;
-    pthread_mutex_t serv_resp_lock;
-    pthread_cond_t serv_resp_cond;
-    pthread_condattr_t serv_resp_cond_attr;
+    lock_t serv_resp_lock;
+    conditionvariable_t serv_resp_cond;
+    conditionvariable_attr_t serv_resp_cond_attr;
 
     //responses to c2 server
     c2_response_t * c2_resps;
-    pthread_mutex_t resp_lock;
-    pthread_cond_t resp_cond;
-    pthread_condattr_t resp_cond_attr;
+    lock_t resp_lock;
+	conditionvariable_t resp_cond;
+	conditionvariable_attr_t resp_cond_attr;
 } c2_message_ctx_t;
 
 #ifdef __cplusplus

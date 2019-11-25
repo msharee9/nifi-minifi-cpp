@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "x64-Release",
-      "generator": "Visual Studio 15 2017",
+      "generator": "Visual Studio 15 2017 Win64",
       "configurationType": "RelWithDebInfo",
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "buildRoot": "${env.USERPROFILE}\\CMakeBuilds\\${workspaceHash}\\build\\${name}",
@@ -73,7 +73,7 @@
         },
         {
           "name": "ENABLE_COAP",
-          "value": "OFF"
+          "value": "ON"
         },
         {
           "name": "DISABLE_LIBARCHIVE",

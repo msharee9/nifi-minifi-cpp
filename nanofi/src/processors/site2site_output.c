@@ -20,26 +20,25 @@
 #include <processors/site2site_output.h>
 
 void initialize_s2s_output(site2site_output_context_t * ctx) {
-    pthread_mutex_init(&ctx->client_mutex, NULL);
-    pthread_mutex_init(&ctx->stop_mutex, NULL);
-    pthread_cond_init(&ctx->stop_cond, NULL);
+    initialize_lock(&ctx->client_mutex);
+    initialize_lock(&ctx->stop_mutex);
+    initialize_cv(&ctx->stop_cond, NULL);
 }
 
 void start_s2s_output(site2site_output_context_t * ctx) {
-    pthread_mutex_lock(&ctx->stop_mutex);
+    acquire_lock(&ctx->stop_mutex);
     ctx->stop = 0;
-    pthread_mutex_unlock(&ctx->stop_mutex);
+    release_lock(&ctx->stop_mutex);
 }
 
 void free_s2s_output_context(site2site_output_context_t * ctx) {
     free_properties(ctx->output_properties);
     free(ctx->host_name);
-    if (ctx->client) {
-        destroyClient(ctx->client);
-    }
-    pthread_mutex_destroy(&ctx->client_mutex);
-    pthread_mutex_destroy(&ctx->stop_mutex);
-    pthread_cond_destroy(&ctx->stop_cond);
+    destroyClient(ctx->client);
+    free(ctx->client);
+    destroy_lock(&ctx->client_mutex);
+    destroy_lock(&ctx->stop_mutex);
+    destroy_cv(&ctx->stop_cond);
     free(ctx);
 }
 
@@ -51,10 +50,10 @@ void write_to_s2s(site2site_output_context_t * s2s_ctx, message_t * msgs) {
             memcpy(payload, head->buff, head->len);
             payload[head->len] = '\0';
             message_t * tmp = head;
-            pthread_mutex_lock(&s2s_ctx->client_mutex);
+            acquire_lock(&s2s_ctx->client_mutex);
             transmitPayload(s2s_ctx->client, payload, &head->as);
             free(payload);
-            pthread_mutex_unlock(&s2s_ctx->client_mutex);
+			release_lock(&s2s_ctx->client_mutex);
             head = head->next;
             tmp->next = NULL;
             free_message(tmp);
@@ -64,21 +63,21 @@ void write_to_s2s(site2site_output_context_t * s2s_ctx, message_t * msgs) {
 
 task_state_t site2site_writer_processor(void * args, void * state) {
     site2site_output_context_t * s2s_ctx = (site2site_output_context_t *)args;
-    pthread_mutex_lock(&s2s_ctx->msg_queue->queue_lock);
+    acquire_lock(&s2s_ctx->msg_queue->queue_lock);
     if (s2s_ctx->msg_queue->stop) {
         //drain messages
-        pthread_mutex_lock(&s2s_ctx->stop_mutex);
+        acquire_lock(&s2s_ctx->stop_mutex);
         message_t * msg;
         while ((msg = dequeue_message_nolock(s2s_ctx->msg_queue)) != NULL) {
             write_to_s2s(s2s_ctx, msg);
         }
         s2s_ctx->stop = 1;
-        pthread_cond_broadcast(&s2s_ctx->stop_cond);
-        pthread_mutex_unlock(&s2s_ctx->stop_mutex);
-        pthread_mutex_unlock(&s2s_ctx->msg_queue->queue_lock);
+        condition_variable_broadcast(&s2s_ctx->stop_cond);
+        release_lock(&s2s_ctx->stop_mutex);
+        release_lock(&s2s_ctx->msg_queue->queue_lock);
         return DONOT_RUN_AGAIN;
     }
-    pthread_mutex_unlock(&s2s_ctx->msg_queue->queue_lock);
+    release_lock(&s2s_ctx->msg_queue->queue_lock);
 
     message_t * msg = dequeue_message(s2s_ctx->msg_queue);
     if (msg) {
@@ -161,9 +160,9 @@ void free_s2s_output_properties(site2site_output_context_t * ctx) {
 }
 
 void wait_s2s_output_stop(site2site_output_context_t * ctx) {
-    pthread_mutex_lock(&ctx->stop_mutex);
+    acquire_lock(&ctx->stop_mutex);
     while (!ctx->stop) {
-        pthread_cond_wait(&ctx->stop_cond, &ctx->stop_mutex);
+        condition_variable_wait(&ctx->stop_cond, &ctx->stop_mutex);
     }
-    pthread_mutex_unlock(&ctx->stop_mutex);
+    release_lock(&ctx->stop_mutex);
 }

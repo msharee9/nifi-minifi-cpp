@@ -15,22 +15,42 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <assert.h>
+#include <core/threadutils.h>
 
-#ifndef NANOFI_INCLUDE_CORE_RING_BUFFER_H_
-#define NANOFI_INCLUDE_CORE_RING_BUFFER_H_
+int create_thread(thread_handle_t * hnd, thread_proc_t tproc, void * args) {
+	if (!hnd || tproc.threadfunc == NULL) {
+		return -1;
+	}
 
-#include <string.h>
+#ifndef WIN32
+	if (pthread_create(&hnd->thread, NULL, tproc.threadfunc, args) != 0) {
+		return -1;
+	}
+#else
+	uintptr_t ret = _beginthreadex(NULL, 0, tproc.threadfunc, args, 0, NULL);
+	if (ret == 0) {
+		hnd->thread = 0;
+		return -1;
+	}
+	hnd->thread = ret;
+#endif
+	return 0;
+}
 
-typedef struct ring_buffer {
-    char * data;
-    size_t size;
-    size_t capacity;
-    size_t read_index;
-    size_t write_index;
-} ring_buffer_t;
+void wait_thread_complete(thread_handle_t * hnd) {
+	assert(hnd != NULL);
+#ifndef WIN32
+	pthread_join(hnd->thread, NULL);
+#else
+	WaitForSingleObject((void *)(&hnd->thread), INFINITE);
+#endif
+}
 
-size_t write_ring_buffer(ring_buffer_t * rb, const char * payload, size_t length);
-size_t read_ring_buffer(ring_buffer_t * rb, char * payload, size_t length);
-void free_ring_buffer(ring_buffer_t * rb);
-
-#endif /* NANOFI_INCLUDE_CORE_RING_BUFFER_H_ */
+void thread_sleep_ms(uint64_t millis) {
+#ifndef WIN32
+	usleep(millis * 1000L);
+#else
+	Sleep(millis);
+#endif
+}

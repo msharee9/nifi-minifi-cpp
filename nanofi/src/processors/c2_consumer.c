@@ -21,14 +21,14 @@
 task_state_t c2_consumer(void * args, void * state) {
     c2context_t * c2 = (c2context_t *)args;
 
-    pthread_mutex_lock(&c2->c2_lock);
+    acquire_lock(&c2->c2_lock);
     if (c2->shuttingdown) {
     	c2->c2_consumer_stop = 1;
-        pthread_cond_broadcast(&c2->consumer_stop_notify);
-        pthread_mutex_unlock(&c2->c2_lock);
+        condition_variable_broadcast(&c2->consumer_stop_notify);
+        release_lock(&c2->c2_lock);
         return DONOT_RUN_AGAIN;
     }
-    pthread_mutex_unlock(&c2->c2_lock);
+    release_lock(&c2->c2_lock);
 
     c2_server_response_t * c2_serv_resp = dequeue_c2_serv_response(c2);
     if (c2_serv_resp && c2_serv_resp->ident) {

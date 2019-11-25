@@ -16,21 +16,47 @@
  * limitations under the License.
  */
 
-#ifndef NANOFI_INCLUDE_CORE_RING_BUFFER_H_
-#define NANOFI_INCLUDE_CORE_RING_BUFFER_H_
+#ifndef THREADUTILS_H_
+#define THREADUTILS_H_
 
-#include <string.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-typedef struct ring_buffer {
-    char * data;
-    size_t size;
-    size_t capacity;
-    size_t read_index;
-    size_t write_index;
-} ring_buffer_t;
+#ifdef WIN32
+#include <windows.h>
+#include <process.h>
+#else
+#include <pthread.h>
+#include <time.h>
+#endif
+#include <stdint.h>
 
-size_t write_ring_buffer(ring_buffer_t * rb, const char * payload, size_t length);
-size_t read_ring_buffer(ring_buffer_t * rb, char * payload, size_t length);
-void free_ring_buffer(ring_buffer_t * rb);
+typedef struct thread_handle {
+#ifdef WIN32
+	uintptr_t thread;
+#else
+	pthread_t thread;
+#endif
+} thread_handle_t;
 
-#endif /* NANOFI_INCLUDE_CORE_RING_BUFFER_H_ */
+#ifndef WIN32
+typedef void*(*pthread_proc_type)(void *);
+#endif
+
+typedef struct thread_proc {
+#ifdef WIN32
+	_beginthreadex_proc_type threadfunc;
+#else
+	pthread_proc_type threadfunc;
+#endif
+} thread_proc_t;
+
+int create_thread(thread_handle_t * hnd, thread_proc_t tproc, void * args);
+void wait_thread_complete(thread_handle_t * hnd);
+void thread_sleep_ms(uint64_t millis);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* THREADUTILS_H_ */

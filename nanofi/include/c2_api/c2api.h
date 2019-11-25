@@ -22,8 +22,8 @@
 extern "C" {
 #endif
 
-#include <core/cstructs.h>
 #include <core/threadpool.h>
+#include <core/cstructs.h>
 #include <ecu_api/ecuapi.h>
 
 typedef struct ecu_entry {
@@ -40,23 +40,23 @@ typedef struct c2context {
     char agent_uuid[37];
 
     ecu_entry_t * ecus;
-    pthread_mutex_t ecus_lock;
+    lock_t ecus_lock;
 
     c2_message_ctx_t * c2_msg_ctx;
     threadpool_t * thread_pool;
 
     uint8_t started;
     uint8_t shuttingdown;
-    pthread_mutex_t c2_lock;
+    lock_t c2_lock;
 
     uint8_t hb_stop;
-    pthread_cond_t hb_stop_notify;
+    conditionvariable_t hb_stop_notify;
 
     uint8_t c2_consumer_stop;
-    pthread_cond_t consumer_stop_notify;
+	conditionvariable_t consumer_stop_notify;
 
     struct coap_messages * messages;
-    pthread_mutex_t coap_msgs_lock;
+    lock_t coap_msgs_lock;
 
     uint8_t registration_required;
 

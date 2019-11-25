@@ -22,6 +22,7 @@
 c2_server_response_t * send_heartbeat(c2context_t * c2_ctx) {
     c2heartbeat_t hb;
     memset(&hb, 0, sizeof(c2heartbeat_t));
+
     hb = prepare_c2_heartbeat(c2_ctx->agent_uuid);
     if (c2_ctx->registration_required) {
         prepare_agent_manifest(c2_ctx, &hb);
@@ -39,7 +40,8 @@ c2_server_response_t * send_heartbeat(c2context_t * c2_ctx) {
         message.size_ = length;
         struct coap_message * coap_response = send_payload(c2_ctx, c2_ctx->heartbeat_uri, &message);
         free(payload);
-        if (coap_response->length == 8
+        if (coap_response
+            && coap_response->length == 8
             && coap_response->code == COAP_RESPONSE_400
             && memcmp(coap_response->data, "register", coap_response->length) == 0) {
 
@@ -72,21 +74,20 @@ void send_acknowledge(c2context_t * c2, c2_response_t * resp) {
 task_state_t c2_heartbeat_sender(void * args, void * state) {
     c2context_t  * c2 = (c2context_t *)args;
 
-    pthread_mutex_lock(&c2->c2_lock);
+    acquire_lock(&c2->c2_lock);
     if (c2->shuttingdown) {
         c2->hb_stop = 1;
-        pthread_cond_broadcast(&c2->hb_stop_notify);
-        pthread_mutex_unlock(&c2->c2_lock);
+        condition_variable_broadcast(&c2->hb_stop_notify);
+        release_lock(&c2->c2_lock);
         return DONOT_RUN_AGAIN;
     }
-    pthread_mutex_unlock(&c2->c2_lock);
+    release_lock(&c2->c2_lock);
 
     c2_response_t * c2_resp = NULL;
     while ((c2_resp = dequeue_c2_resp(c2))) {
         send_acknowledge(c2, c2_resp);
         free_c2_responses(c2_resp);
     }
-
     c2_server_response_t * response = send_heartbeat(c2);
     if (response) {
         enqueue_c2_serv_response(c2, response);

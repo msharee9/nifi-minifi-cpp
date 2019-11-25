@@ -85,10 +85,22 @@ int create_endpoint_context(coap_context_t **ctx, const char *node, const char *
   hints.ai_family = AF_UNSPEC;  // ipv4 or ipv6
   hints.ai_socktype = SOCK_DGRAM;
   hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+
+#ifdef WIN32
+  WSADATA wsadata;
+  int err = WSAStartup(MAKEWORD(2, 2), &wsadata);
+  if (err != 0) {
+      return NULL;
+  }
+#endif
+
   int getaddrres = getaddrinfo(node, port, &hints, &result);
   if (getaddrres != 0) {
-    perror("getaddrinfo");
-    return -1;
+      perror("getaddrinfo");
+#ifdef WIN32
+      WSACleanup();
+#endif
+      return -1;
   }
 
   for (interface_itr = result; interface_itr != NULL; interface_itr = interface_itr->ai_next) {
@@ -105,12 +117,18 @@ int create_endpoint_context(coap_context_t **ctx, const char *node, const char *
 
       if (*ctx && ep_udp) {
         freeaddrinfo(result);
+#ifdef WIN32
+        WSACleanup();
+#endif
         return 0;
       }
     }
   }
 
   freeaddrinfo(result);
+#ifdef WIN32
+  WSACleanup();
+#endif
   return -2;
 }
 
@@ -191,7 +209,6 @@ int resolve_address(const struct coap_str_const_t *server, struct sockaddr *dest
 
   if (error != 0) {
     perror("getaddrinfo");
-
     return error;
   }
 

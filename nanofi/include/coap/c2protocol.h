@@ -23,10 +23,10 @@
 extern "C" {
 #endif
 
-#include <stddef.h>
-
-#include "c2structs.h"
+#include "coap/c2structs.h"
 #include "coap/coapprotocol.h"
+
+#include <stddef.h>
 
 size_t encode_heartbeat(const struct c2heartbeat * heartbeat, char ** buff, size_t * length);
 int decode_heartbeat(const unsigned char * payload, size_t length, struct c2heartbeat * heartbeat, size_t * bytes_decoded);

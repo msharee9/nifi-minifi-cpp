@@ -23,8 +23,8 @@
 extern "C" {
 #endif
 
-#include <pthread.h>
-#include <time.h>
+#include <core/synchutils.h>
+#include <core/threadutils.h>
 #include <stdint.h>
 #include "utlist.h"
 
@@ -50,10 +50,10 @@ typedef struct task_node {
 
 typedef struct threadpool {
     task_node_t * task_queue;
-    pthread_mutex_t task_queue_mutex;
-    pthread_cond_t task_queue_cond;
+	lock_t task_queue_lock;
+    conditionvariable_t task_queue_cond;
     int num_threads;
-    pthread_t * threads;
+    thread_handle_t * threads;
     int shuttingdown;
     int num_tasks;
     int started;
@@ -65,19 +65,16 @@ int is_task_repeatable(task_t * task);
 uint64_t get_task_repeat_interval(task_t * task);
 uint64_t get_num_tasks(threadpool_t * pool);
 
-uint64_t get_time_millis(struct timespec ts);
-uint64_t get_now_ms();
-
-/* uses CLOCK_MONOTONIC */
-struct timespec get_timespec_millis_from_now(uint64_t millis);
-
-int condition_timed_wait(pthread_cond_t * cond, pthread_mutex_t * mutex, uint64_t millis);
-
 void threadpool_add(threadpool_t * pool, task_node_t * task);
-void threadpool_start(threadpool_t * pool);
+int threadpool_start(threadpool_t * pool);
 void threadpool_shutdown(threadpool_t * pool);
 threadpool_t * threadpool_create(uint64_t num_threads);
+
+#ifndef WIN32
 void * threadpool_thread_function(void * pool);
+#else
+unsigned __stdcall threadpool_thread_function(PVOID p);
+#endif
 
 #ifdef __cplusplus
 }

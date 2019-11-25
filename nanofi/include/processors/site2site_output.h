@@ -22,9 +22,9 @@
 extern "C" {
 #endif
 
-#include <pthread.h>
 #include <sitetosite/CRawSocketProtocol.h>
 #include <core/message_queue.h>
+#include <core/synchutils.h>
 #include <ecu_api/ecuapi.h>
 
 typedef struct site2site_output_context {
@@ -34,10 +34,10 @@ typedef struct site2site_output_context {
     properties_t * output_properties;
     message_queue_t * msg_queue;
     struct CRawSiteToSiteClient * client;
-    pthread_mutex_t client_mutex;
+    lock_t client_mutex;
     int stop;
-    pthread_mutex_t stop_mutex;
-    pthread_cond_t stop_cond;
+    lock_t stop_mutex;
+    conditionvariable_t stop_cond;
 } site2site_output_context_t;
 
 void initialize_s2s_output(site2site_output_context_t * ctx);

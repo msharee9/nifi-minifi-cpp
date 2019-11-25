@@ -25,8 +25,8 @@ extern "C" {
 
 #include "utlist.h"
 #include <stdint.h>
-#include <pthread.h>
 #include <core/ring_buffer.h>
+#include <core/synchutils.h>
 #include <core/cstructs.h>
 
 typedef struct message_attrs {
@@ -41,8 +41,9 @@ typedef struct message_queue {
     ring_buffer_t * ring_buff;
     message_attrs_t * attrs;
     attribute_set_cb_t attr_cb;
-    pthread_mutex_t queue_lock;
-    pthread_cond_t write_notify;
+    lock_t queue_lock;
+    conditionvariable_t write_notify;
+	conditionvariable_attr_t wrt_notify_attr;
     int stop;
 } message_queue_t;
 

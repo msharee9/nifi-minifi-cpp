@@ -16,10 +16,10 @@
  * limitations under the License.
  */
 
+#include <core/threadpool.h>
 #include <ecu_api/ecuapi.h>
 #include <processors/file_input.h>
 #include <processors/site2site_output.h>
-#include <core/threadpool.h>
 #include <uuid/uuid.h>
 
 void initialize_ecu(const char * name, ecu_context_t * ecu, io_type_t ip, void * ip_ctx, io_type_t op, void * op_ctx) {
@@ -31,11 +31,13 @@ void initialize_ecu(const char * name, ecu_context_t * ecu, io_type_t ip, void *
         strcpy(ecu->name, name);
     }
 
-    UUID_FIELD uuid;
-    uuid_generate(uuid);
-    uuid_unparse_lower(uuid, ecu->uuid);
+    CIDGenerator gen;
+    gen.implementation_ = CUUID_DEFAULT_IMPL;
+    generate_uuid(&gen, ecu->uuid);
+    ecu->uuid[36] = '\0';
+    printf("created ecu with uuid: %s\n", ecu->uuid);
 
-    pthread_mutex_init(&ecu->ctx_lock, NULL);
+    initialize_lock(&ecu->ctx_lock);
     ecu->input = ip;
     ecu->output = op;
     if (!ip_ctx) {
@@ -383,19 +385,19 @@ void * create_output(io_type_t type) {
 }
 
 int start_ecu_context(ecu_context_t * ecu_ctx) {
-    pthread_mutex_lock(&ecu_ctx->ctx_lock);
+    acquire_lock(&ecu_ctx->ctx_lock);
     if (ecu_ctx->started) {
-        pthread_mutex_unlock(&ecu_ctx->ctx_lock);
+        release_lock(&ecu_ctx->ctx_lock);
         return 0;
     }
 
     if (validate_input(ecu_ctx) < 0) {
-        pthread_mutex_unlock(&ecu_ctx->ctx_lock);
+        release_lock(&ecu_ctx->ctx_lock);
         return -1;
     }
 
     if (validate_output(ecu_ctx) < 0) {
-        pthread_mutex_unlock(&ecu_ctx->ctx_lock);
+        release_lock(&ecu_ctx->ctx_lock);
         return -1;
     }
 
@@ -449,17 +451,20 @@ int start_ecu_context(ecu_context_t * ecu_ctx) {
         break;
     }
 
-    threadpool_start(ecu_ctx->thread_pool);
+    if (threadpool_start(ecu_ctx->thread_pool) < 0) {
+        release_lock(&ecu_ctx->ctx_lock);
+        return -1;
+    }
     ecu_ctx->started = 1;
-    pthread_mutex_unlock(&ecu_ctx->ctx_lock);
+    release_lock(&ecu_ctx->ctx_lock);
     return 0;
 }
 
 void destroy_msg_queue(message_queue_t ** queue) {
     message_queue_t * mq = *queue;
     if (mq) {
-        pthread_mutex_destroy(&mq->queue_lock);
-        pthread_cond_destroy(&mq->write_notify);
+        destroy_lock(&mq->queue_lock);
+        destroy_cv(&mq->write_notify);
         free(mq);
         *queue = NULL;
     }
@@ -498,16 +503,16 @@ void wait_output_stop(ecu_context_t * ctx) {
 }
 
 int stop_ecu_context(ecu_context_t * ctx) {
-    pthread_mutex_lock(&ctx->ctx_lock);
+    acquire_lock(&ctx->ctx_lock);
     if (!ctx->started) {
-        pthread_mutex_unlock(&ctx->ctx_lock);
+        release_lock(&ctx->ctx_lock);
         return 0;
     }
     stop_message_queue(ctx->msg_queue);
     wait_input_stop(ctx);
     wait_output_stop(ctx);
     ctx->started = 0;
-    pthread_mutex_unlock(&ctx->ctx_lock);
+    release_lock(&ctx->ctx_lock);
     return 0;
 }
 
@@ -585,8 +590,8 @@ void destroy_ecu(ecu_context_t * ctx) {
     free_ecu_context(ctx);
     free(ctx->name);
     free(ctx->thread_pool);
-    pthread_mutex_lock(&ctx->ctx_lock);
-    pthread_mutex_destroy(&ctx->ctx_lock);
+    acquire_lock(&ctx->ctx_lock);
+    destroy_lock(&ctx->ctx_lock);
     free(ctx);
 }
 
@@ -595,25 +600,25 @@ int on_start(ecu_context_t * ecu_ctx, io_type_t input, io_type_t output, propert
         return -1;
     }
 
-    pthread_mutex_lock(&ecu_ctx->ctx_lock);
+    acquire_lock(&ecu_ctx->ctx_lock);
     if (ecu_ctx->started) {
-        pthread_mutex_unlock(&ecu_ctx->ctx_lock);
+        release_lock(&ecu_ctx->ctx_lock);
         return 0;
     }
 
     ecu_ctx->input = input;
     if (set_input_properties(ecu_ctx, input_props) < 0) {
-        pthread_mutex_unlock(&ecu_ctx->ctx_lock);
+        release_lock(&ecu_ctx->ctx_lock);
         return -1;
     }
 
     ecu_ctx->output = output;
     if (set_output_properties(ecu_ctx, output_props) < 0) {
-        pthread_mutex_unlock(&ecu_ctx->ctx_lock);
+        release_lock(&ecu_ctx->ctx_lock);
         return -1;
     }
 
-    pthread_mutex_unlock(&ecu_ctx->ctx_lock);
+    release_lock(&ecu_ctx->ctx_lock);
     return start_ecu_context(ecu_ctx);
 }
 

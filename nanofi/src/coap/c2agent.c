@@ -16,6 +16,28 @@
  * limitations under the License.
  */
 
+#if defined(__APPLE__) && defined(__MACH__)
+#define MAC
+#include <sys/sysctl.h>
+#elif defined(WIN32)
+#pragma comment(lib, "ws2_32.lib")
+#define _WINSOCKAPI_
+#include <winsock.h>
+#include <ws2tcpip.h>
+#include <sysinfoapi.h>
+#include <windows.h>
+#else
+#include <sys/sysinfo.h>
+#endif
+#include <core/synchutils.h>
+
+#ifndef WIN32
+#include <netdb.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/utsname.h>
+#endif
+
 #include "coap/c2structs.h"
 #include "coap/c2agent.h"
 #include "coap/c2protocol.h"
@@ -23,23 +45,9 @@
 
 #include "nanofi/coap_message.h"
 
-#include <time.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <sys/socket.h>
-#include <sys/utsname.h>
-#include <sys/errno.h>
-
+#include <errno.h>
 #include "utlist.h"
 #include <uuid/uuid.h>
-
-#if defined(__APPLE__) && defined(__MACH__)
-#define MAC
-#include <sys/sysctl.h>
-#else
-#include <sys/sysinfo.h>
-#endif
 
 uint64_t get_physical_memory_size() {
 #ifdef MAC
@@ -47,6 +55,11 @@ uint64_t get_physical_memory_size() {
     size_t len = sizeof(memsize);
     if (sysctlbyname("hw.memsize", &memsize, &len, NULL, 0) == 0) {
         return memsize;
+    }
+#elif defined(WIN32)
+    uint64_t totalMemoryKB;
+    if (GetPhysicallyInstalledSystemMemory(&totalMemoryKB)) {
+        return (totalMemoryKB * 1024);
     }
 #else
     struct sysinfo sys_info;
@@ -65,6 +78,10 @@ uint16_t get_num_vcores() {
         return num_cpus;
     }
     return 0;
+#elif defined(WIN32)
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    return (uint16_t)sysinfo.dwNumberOfProcessors;
 #else
     long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
     if (ncpus < 0) {
@@ -74,10 +91,40 @@ uint16_t get_num_vcores() {
 #endif
 }
 
+int get_host_name(char * buffer, size_t len) {
+    if (len == 0 || !buffer) return -1;
+#ifdef WIN32
+    WSADATA wsadata;
+    int err = WSAStartup(MAKEWORD(2, 2), &wsadata);
+    if (err != 0) {
+        return -1;
+    }
+    if (gethostname(buffer, len) != 0) {
+        WSACleanup();
+        return -1;
+    }
+    WSACleanup();
+    return 0;
+#else
+    if (gethostname(buffer, len) < 0) {
+        return -1;
+    }
+    return 0;
+#endif
+}
+
 char * get_ipaddr_from_hostname(const char * hostname) {
+    size_t len = 45;
+#ifdef WIN32
+    WSADATA wsadata;
+    int err = WSAStartup(MAKEWORD(2, 2), &wsadata);
+    if (err != 0) {
+        return NULL;
+    }
+#endif
     struct addrinfo hints, *infoptr;
     memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_INET;
 
     int result = getaddrinfo(hostname, NULL, &hints, &infoptr);
     if (result) {
@@ -85,7 +132,6 @@ char * get_ipaddr_from_hostname(const char * hostname) {
         return NULL;
     }
 
-    size_t len = 45;
     char * host = (char *)malloc((len+1) * sizeof(char));
     struct addrinfo *p;
     for (p = infoptr; p != NULL; p = p->ai_next) {
@@ -97,6 +143,9 @@ char * get_ipaddr_from_hostname(const char * hostname) {
 
     freeaddrinfo(infoptr);
     free(host);
+#ifdef WIN32
+    WSACleanup();
+#endif
     return NULL;
 }
 
@@ -104,11 +153,35 @@ int get_machine_architecture(char * buff) {
     if (!buff) {
         return -1;
     }
+#ifdef WIN32
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    DWORD parch = sysinfo.wProcessorArchitecture; 
+    switch (parch) {
+    case PROCESSOR_ARCHITECTURE_AMD64:
+        strcpy(buff, "x64");
+        break;
+    case PROCESSOR_ARCHITECTURE_ARM:
+        strcpy(buff, "arm");
+        break;
+    case PROCESSOR_ARCHITECTURE_IA64:
+        strcpy(buff, "ia64");
+        break;
+    case PROCESSOR_ARCHITECTURE_INTEL:
+        strcpy(buff, "x86");
+        break;
+    default:
+        strcpy(buff, "unknown");
+        break;
+    }
+    return 0;
+#else
     struct utsname name;
     if (uname(&name) == 0) {
         strcpy(buff, name.machine);
         return 0;
     }
+#endif
     return -1;
 }
 
@@ -135,7 +208,7 @@ c2heartbeat_t prepare_c2_heartbeat(const char * agent_id) {
     //device_info.network_info
     size_t len = sizeof(c2_heartbeat.device_info.network_info.host_name);
     memset(c2_heartbeat.device_info.network_info.host_name, 0, len);
-    if (gethostname(c2_heartbeat.device_info.network_info.host_name, len) < 0) {
+    if (get_host_name(c2_heartbeat.device_info.network_info.host_name, len) < 0) {
         strcpy(c2_heartbeat.device_info.network_info.host_name, "unknown");
     }
     char * ipaddr = get_ipaddr_from_hostname(c2_heartbeat.device_info.network_info.host_name);
@@ -342,7 +415,7 @@ ecu_entry_t * find_ecu(ecu_entry_t * ecus, const char * uuid) {
 void handle_c2_server_response(c2context_t * c2, c2_server_response_t * resp) {
     if (!resp) return;
 
-    pthread_mutex_lock(&c2->ecus_lock);
+    acquire_lock(&c2->ecus_lock);
     /*ecu_entry_t * entry = find_ecu(c2->ecus, resp->operand);
     if (!entry) {
         pthread_mutex_unlock(&c2->ecus_lock);
@@ -365,7 +438,7 @@ void handle_c2_server_response(c2context_t * c2, c2_server_response_t * resp) {
     default:
         break;
     }
-    pthread_mutex_unlock(&c2->ecus_lock);
+    release_lock(&c2->ecus_lock);
 }
 
 void free_c2_responses(c2_response_t * resps) {
@@ -389,35 +462,35 @@ void free_c2_server_responses(c2_server_response_t * resps) {
 }
 
 void free_c2_message_context(c2_message_ctx_t * ctx) {
-    pthread_mutex_lock(&ctx->serv_resp_lock);
+    acquire_lock(&ctx->serv_resp_lock);
     free_c2_server_responses(ctx->c2_serv_resps);
-    pthread_condattr_destroy(&ctx->serv_resp_cond_attr);
-    pthread_cond_destroy(&ctx->serv_resp_cond);
-    pthread_mutex_destroy(&ctx->serv_resp_lock);
+    destroy_cvattr(&ctx->serv_resp_cond_attr);
+    destroy_cv(&ctx->serv_resp_cond);
+    destroy_lock(&ctx->serv_resp_lock);
 
-    pthread_mutex_lock(&ctx->resp_lock);
+    acquire_lock(&ctx->resp_lock);
     free_c2_responses(ctx->c2_resps);
-    pthread_condattr_destroy(&ctx->resp_cond_attr);
-    pthread_cond_destroy(&ctx->resp_cond);
-    pthread_mutex_destroy(&ctx->resp_lock);
+    destroy_cvattr(&ctx->resp_cond_attr);
+    destroy_cv(&ctx->resp_cond);
+    destroy_lock(&ctx->resp_lock);
     free(ctx);
 }
 
 c2_message_ctx_t * create_c2_message_context() {
     c2_message_ctx_t * msg_ctx = (c2_message_ctx_t *)malloc(sizeof(c2_message_ctx_t));
     memset(msg_ctx, 0, sizeof(c2_message_ctx_t));
-    pthread_mutex_init(&msg_ctx->resp_lock, NULL);
-    pthread_mutex_init(&msg_ctx->serv_resp_lock, NULL);
-    pthread_condattr_init(&msg_ctx->resp_cond_attr);
-    pthread_condattr_init(&msg_ctx->serv_resp_cond_attr);
-#if defined(__APPLE__)
-    pthread_cond_init(&msg_ctx->resp_cond, NULL);
-    pthread_cond_init(&msg_ctx->serv_resp_cond, NULL);
+    initialize_lock(&msg_ctx->resp_lock);
+    initialize_lock(&msg_ctx->serv_resp_lock);
+#if defined(__APPLE__) || defined(WIN32)
+    initialize_cv(&msg_ctx->resp_cond, NULL);
+    initialize_cv(&msg_ctx->serv_resp_cond, NULL);
 #else
-    pthread_cond_init(&msg_ctx->resp_cond, &msg_ctx->resp_cond_attr);
-    pthread_cond_init(&msg_ctx->serv_resp_cond, &msg_ctx->serv_resp_cond_attr);
-    pthread_condattr_setclock(&msg_ctx->resp_cond_attr, CLOCK_MONOTONIC);
-    pthread_condattr_setclock(&msg_ctx->serv_resp_cond_attr, CLOCK_MONOTONIC);
+    initialize_cvattr(&msg_ctx->resp_cond_attr);
+    initialize_cvattr(&msg_ctx->serv_resp_cond_attr);
+    initialize_cv(&msg_ctx->resp_cond, &msg_ctx->resp_cond_attr);
+    initialize_cv(&msg_ctx->serv_resp_cond, &msg_ctx->serv_resp_cond_attr);
+    condition_attr_set_clock(&msg_ctx->resp_cond_attr, CLOCK_MONOTONIC);
+    condition_attr_set_clock(&msg_ctx->serv_resp_cond_attr, CLOCK_MONOTONIC);
 #endif
     return msg_ctx;
 }
@@ -425,21 +498,21 @@ c2_message_ctx_t * create_c2_message_context() {
 void enqueue_c2_serv_response(c2context_t * c2, c2_server_response_t * serv_resp) {
     if (!c2 || !serv_resp) return;
 
-    pthread_mutex_lock(&c2->c2_msg_ctx->serv_resp_lock);
+    acquire_lock(&c2->c2_msg_ctx->serv_resp_lock);
     LL_APPEND(c2->c2_msg_ctx->c2_serv_resps, serv_resp);
-    pthread_cond_signal(&c2->c2_msg_ctx->serv_resp_cond);
-    pthread_mutex_unlock(&c2->c2_msg_ctx->serv_resp_lock);
+    condition_variable_signal(&c2->c2_msg_ctx->serv_resp_cond);
+    release_lock(&c2->c2_msg_ctx->serv_resp_lock);
 }
 
 c2_server_response_t * dequeue_c2_serv_response(c2context_t * c2) {
     if (!c2) return NULL;
 
-    pthread_mutex_lock(&c2->c2_msg_ctx->serv_resp_lock);
+    acquire_lock(&c2->c2_msg_ctx->serv_resp_lock);
 
     while (!c2->c2_msg_ctx->c2_serv_resps) {
-        int ret = condition_timed_wait(&c2->c2_msg_ctx->serv_resp_cond, &c2->c2_msg_ctx->serv_resp_lock, 200);
+        int ret = condition_variable_timedwait(&c2->c2_msg_ctx->serv_resp_cond, &c2->c2_msg_ctx->serv_resp_lock, 200);
         if (ret == ETIMEDOUT) {
-            pthread_mutex_unlock(&c2->c2_msg_ctx->serv_resp_lock);
+            release_lock(&c2->c2_msg_ctx->serv_resp_lock);
             return NULL;
         }
     }
@@ -447,28 +520,28 @@ c2_server_response_t * dequeue_c2_serv_response(c2context_t * c2) {
     c2_server_response_t * head = c2->c2_msg_ctx->c2_serv_resps;
     c2->c2_msg_ctx->c2_serv_resps = c2->c2_msg_ctx->c2_serv_resps->next;
     head->next = NULL;
-    pthread_mutex_unlock(&c2->c2_msg_ctx->serv_resp_lock);
+    release_lock(&c2->c2_msg_ctx->serv_resp_lock);
     return head;
 }
 
 void enqueue_c2_resp(c2context_t * c2, c2_response_t * resp) {
     if (!c2 || !resp) return;
 
-    pthread_mutex_lock(&c2->c2_msg_ctx->resp_lock);
+    acquire_lock(&c2->c2_msg_ctx->resp_lock);
     LL_APPEND(c2->c2_msg_ctx->c2_resps, resp);
-    pthread_cond_signal(&c2->c2_msg_ctx->resp_cond);
-    pthread_mutex_unlock(&c2->c2_msg_ctx->resp_lock);
+    condition_variable_signal(&c2->c2_msg_ctx->resp_cond);
+    release_lock(&c2->c2_msg_ctx->resp_lock);
 }
 
 c2_response_t * dequeue_c2_resp(c2context_t * c2) {
     if (!c2) return NULL;
 
-    pthread_mutex_lock(&c2->c2_msg_ctx->resp_lock);
+    acquire_lock(&c2->c2_msg_ctx->resp_lock);
 
     while (!c2->c2_msg_ctx->c2_resps) {
-        int ret = condition_timed_wait(&c2->c2_msg_ctx->resp_cond, &c2->c2_msg_ctx->resp_lock, 200);
+        int ret = condition_variable_timedwait(&c2->c2_msg_ctx->resp_cond, &c2->c2_msg_ctx->resp_lock, 200);
         if (ret == ETIMEDOUT) {
-            pthread_mutex_unlock(&c2->c2_msg_ctx->resp_lock);
+            release_lock(&c2->c2_msg_ctx->resp_lock);
             return NULL;
         }
     }
@@ -476,6 +549,6 @@ c2_response_t * dequeue_c2_resp(c2context_t * c2) {
     c2_response_t * head = c2->c2_msg_ctx->c2_resps;
     c2->c2_msg_ctx->c2_resps = c2->c2_msg_ctx->c2_resps->next;
     head->next = NULL;
-    pthread_mutex_unlock(&c2->c2_msg_ctx->resp_lock);
+    release_lock(&c2->c2_msg_ctx->resp_lock);
     return head;
 }

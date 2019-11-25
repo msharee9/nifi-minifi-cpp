@@ -22,11 +22,10 @@
 extern "C" {
 #endif
 
-#include <unistd.h>
 #include <stdint.h>
 #include <string.h>
-#include <pthread.h>
 #include <stdio.h>
+#include <core/threadutils.h>
 #include <core/message_queue.h>
 #include <ecu_api/ecuapi.h>
 
@@ -39,8 +38,8 @@ typedef struct file_input_context {
     uint64_t tail_frequency;
     message_queue_t * msg_queue;
     int stop;
-    pthread_mutex_t stop_mutex;
-    pthread_cond_t stop_cond;
+    lock_t stop_mutex;
+    conditionvariable_t stop_cond;
 } file_input_context_t;
 
 typedef struct data_buff {

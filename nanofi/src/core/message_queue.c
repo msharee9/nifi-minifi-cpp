@@ -16,8 +16,8 @@
  * limitations under the License.
  */
 
-#include <time.h>
 #include <errno.h>
+#include <core/synchutils.h>
 #include <core/message_queue.h>
 
 message_queue_t * create_msg_queue(uint64_t capacity_bytes) {
@@ -28,8 +28,16 @@ message_queue_t * create_msg_queue(uint64_t capacity_bytes) {
     message_queue_t * mq = (message_queue_t *)malloc(sizeof(message_queue_t));
     memset(mq, 0, sizeof(message_queue_t));
     mq->ring_buff = rb;
-    pthread_mutex_init(&mq->queue_lock, NULL);
-    pthread_cond_init(&mq->write_notify, NULL);
+    initialize_lock(&mq->queue_lock);
+#ifndef WIN32
+	initialize_cvattr(&mq->wrt_notify_attr);
+	initialize_cv(&mq->write_notify, &mq->wrt_notify_attr);
+#ifndef __APPLE__
+	condition_attr_set_clock(&mq->wrt_notify_attr, CLOCK_MONOTONIC);
+#endif
+#else
+    initialize_cv(&mq->write_notify, NULL);
+#endif
     return mq;
 }
 
@@ -39,7 +47,7 @@ void set_attribute_update_cb(message_queue_t * mq, attribute_set_cb_t cb) {
 
 void free_queue(message_queue_t * mq) {
 	if (!mq) return;
-    pthread_mutex_lock(&mq->queue_lock);
+    acquire_lock(&mq->queue_lock);
     message_attrs_t * head = mq->attrs;
     while (head) {
         message_attrs_t * tmp = head;
@@ -48,8 +56,9 @@ void free_queue(message_queue_t * mq) {
         free(tmp);
     }
     free_ring_buffer(mq->ring_buff);
-    pthread_mutex_destroy(&mq->queue_lock);
-    pthread_cond_destroy(&mq->write_notify);
+    destroy_lock(&mq->queue_lock);
+	destroy_cvattr(&mq->wrt_notify_attr);
+    destroy_cv(&mq->write_notify);
     free(mq);
 }
 
@@ -94,21 +103,15 @@ size_t enqueue_message(message_queue_t * mq, message_t * msg) {
    if (!msg || !mq) {
        return 0;
    }
-   pthread_mutex_lock(&mq->queue_lock);
+   acquire_lock(&mq->queue_lock);
    char * payload = msg->buff;
    size_t length = msg->len;
-
-   struct timespec ts;
-   clock_gettime(CLOCK_REALTIME, &ts);
-   ts.tv_nsec += 3 * 1000000;
-   ts.tv_sec += ts.tv_nsec / 1000000000L;
-   ts.tv_nsec = ts.tv_nsec % 1000000000L;
 
    size_t bytes_enqueued = 0;
    while (length - bytes_enqueued > 0) {
        bytes_enqueued += write_ring_buffer(mq->ring_buff, payload + bytes_enqueued, (length - bytes_enqueued));
        if (bytes_enqueued < length) {
-           int ret = pthread_cond_timedwait(&mq->write_notify, &mq->queue_lock, &ts);
+		   int ret = condition_variable_timedwait(&mq->write_notify, &mq->queue_lock, 300);
            if (ret == ETIMEDOUT) {
                //timed out waiting to enqueue rest of the payload
                break;
@@ -130,7 +133,7 @@ size_t enqueue_message(message_queue_t * mq, message_t * msg) {
    free(payload);
    free_attributes(msg->as);
    free(msg);
-   pthread_mutex_unlock(&mq->queue_lock);
+   release_lock(&mq->queue_lock);
    return bytes_enqueued;
 }
 
@@ -139,7 +142,7 @@ message_t * dequeue_message(message_queue_t * mq) {
         return NULL;
     }
 
-    pthread_mutex_lock(&mq->queue_lock);
+    acquire_lock(&mq->queue_lock);
     message_t * msg = NULL;
     if (mq->attrs) {
         message_attrs_t * head = mq->attrs;
@@ -157,21 +160,21 @@ message_t * dequeue_message(message_queue_t * mq) {
         }
         free(head);
     }
-    pthread_cond_broadcast(&mq->write_notify);
-    pthread_mutex_unlock(&mq->queue_lock);
+	condition_variable_broadcast(&mq->write_notify);
+    release_lock(&mq->queue_lock);
     return msg;
 }
 
 void stop_message_queue(message_queue_t * queue) {
-    pthread_mutex_lock(&queue->queue_lock);
+    acquire_lock(&queue->queue_lock);
     queue->stop = 1;
-    pthread_mutex_unlock(&queue->queue_lock);
+	release_lock(&queue->queue_lock);
 }
 
 void start_message_queue(message_queue_t * queue) {
-    pthread_mutex_lock(&queue->queue_lock);
+    acquire_lock(&queue->queue_lock);
     queue->stop = 0;
-    pthread_mutex_unlock(&queue->queue_lock);
+	release_lock(&queue->queue_lock);
 }
 
 message_t * dequeue_message_nolock(message_queue_t * mq) {

@@ -1,0 +1,19 @@
+cmake_minimum_required(VERSION 3.0)
+include(ExternalProject)
+
+find_package(Patch REQUIRED)
+
+set(PATCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(LIBCOAP_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}/libcoap-src")
+
+ExternalProject_Add(
+	libcoap-external
+	GIT_REPOSITORY "https://github.com/obgm/libcoap.git"
+    GIT_TAG "d6c25a9a0757af9d13842b7aae9713136e720567"
+    #GIT_TAG "00486a4f46e0278dd24a8ff3411416ff420cde29"
+    SOURCE_DIR "${LIBCOAP_SRC_DIR}"
+    PATCH_COMMAND "${Patch_EXECUTABLE}" "-p1" "-i" "${PATCH_DIR}/libcoap_windows.patch"
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    CONFIGURE_COMMAND ""
+)

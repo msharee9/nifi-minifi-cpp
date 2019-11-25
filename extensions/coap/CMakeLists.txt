@@ -23,21 +23,16 @@ include_directories(protocols nanofi controllerservice server)
 include_directories(../http-curl/)
 
 file(GLOB CSOURCES "nanofi/*.c")
-file(GLOB SOURCES "*.cpp" "protocols/*.cpp" "processors/*.cpp" "controllerservice/*.cpp" "server/*.cpp" )
+file(GLOB SOURCES "*.cpp" "protocols/*.cpp" "controllerservice/*.cpp" "server/*.cpp" )
 
-add_library(nanofi-coap-c STATIC ${CSOURCES})
+set(BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+set(DIR "${BASE_DIR}/thirdparty/libcoap-src")
 add_library(minifi-coap STATIC ${SOURCES})
-set_property(TARGET minifi-coap PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-if(CMAKE_THREAD_LIBS_INIT)
-  target_link_libraries(minifi-coap "${CMAKE_THREAD_LIBS_INIT}")
-endif()
+if (NOT WIN32)
+    set(BYPRODUCT "${BASE_DIR}/thirdparty/libcoap-src/.libs/libcoap-2.a")
 
-  set(BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
-  # determine version of GNUTLSs
-  set(BYPRODUCT "${BASE_DIR}/thirdparty/libcoap-src/.libs/libcoap-2.a")
-  set(DIR "${BASE_DIR}/thirdparty/libcoap-src")
-  ExternalProject_Add(
+    ExternalProject_Add(
     coap-external
     GIT_REPOSITORY "https://github.com/obgm/libcoap.git"
     GIT_TAG "00486a4f46e0278dd24a8ff3411416ff420cde29"
@@ -52,27 +47,50 @@ endif()
     PATCH_COMMAND ./autogen.sh && ./configure --disable-examples --disable-dtls --disable-tests --disable-documentation
     STEP_TARGETS build
     EXCLUDE_FROM_ALL TRUE
-  )
-  add_definitions("-DWITH_POSIX=1")
-  
-  add_library(coaplib STATIC IMPORTED)
-  set_target_properties(coaplib PROPERTIES IMPORTED_LOCATION "${BYPRODUCT}")
-  add_dependencies(coaplib coap-external)
-  set(COAP_FOUND "YES" CACHE STRING "" FORCE)
-  set(COAP_INCLUDE_DIRS "${DIR}/include" CACHE STRING "" FORCE)
-  set(COAP_LIBRARIES coaplib CACHE STRING "" FORCE)
-  set(COAP_LIBRARY coaplib CACHE STRING "" FORCE)
-  set(COAP_LIBRARY coaplib CACHE STRING "" FORCE)
-target_link_libraries(minifi-coap ${CMAKE_DL_LIBS})
+    )
+    add_definitions("-DWITH_POSIX=1")
+    add_library(coap STATIC IMPORTED)
+	set_target_properties(coap PROPERTIES IMPORTED_LOCATION "${BYPRODUCT}")
+	add_dependencies(coap coap-external)
+	set(COAP_FOUND "YES" CACHE STRING "" FORCE)
+	set(COAP_INCLUDE_DIRS "${DIR}/include" CACHE STRING "" FORCE)
+	include_directories(${COAP_INCLUDE_DIRS})
+else()
+    configure_file(DownloadCoapCMakeLists.txt.in "${CMAKE_CURRENT_BINARY_DIR}/coap_download/CMakeLists.txt" @ONLY)
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/libcoap_windows.patch" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/coap_download")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -G "Visual Studio 15 2017 Win64" . WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/coap_download")
+    execute_process(COMMAND "${CMAKE_COMMAND}" --build . WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/coap_download")
 
-include_directories(${COAP_INCLUDE_DIRS})
+    set(COAP_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/coap_download/libcoap-src")
 
-target_link_libraries (nanofi-coap-c ${COAP_LIBRARIES})
-target_link_libraries (nanofi-coap-c ${HTTP-CURL})
-target_link_libraries (minifi-coap nanofi-coap-c ${COAP_LIBRARIES})
+    file(GLOB COAP_SOURCE_FILES "${COAP_SOURCE_DIR}/src/*.c")
+    list(REMOVE_ITEM COAP_SOURCE_FILES ${COAP_SOURCE_DIR}/src/coap_io_lwip.c)
+
+	configure_file(${COAP_SOURCE_DIR}/coap_config.h.windows ${COAP_SOURCE_DIR}/coap_config.h)
+	configure_file(${COAP_SOURCE_DIR}/include/coap2/coap.h.windows ${COAP_SOURCE_DIR}/include/coap2/coap.h)
+
+    add_library(coap STATIC ${COAP_SOURCE_FILES})
+    
+    target_include_directories(coap PUBLIC "${COAP_SOURCE_DIR}")
+    target_include_directories(coap PUBLIC "${COAP_SOURCE_DIR}/include")
+    target_include_directories(coap PUBLIC "${COAP_SOURCE_DIR}/include/coap2")
+
+endif()
+set(COAP_LIBRARIES coap CACHE STRING "" FORCE)
+
+add_library(nanofi-coap-c STATIC ${CSOURCES})
+add_dependencies(minifi-coap nanofi-coap-c)
+add_dependencies(nanofi-coap-c coap)
+target_link_libraries(nanofi-coap-c PUBLIC ${COAP_LIBRARIES} ${CMAKE_DL_LIBS})
+target_link_libraries(minifi-coap PUBLIC nanofi-coap-c PRIVATE ${CMAKE_DL_LIBS})
+
+if(CMAKE_THREAD_LIBS_INIT)
+    target_link_libraries(minifi-coap PUBLIC "${CMAKE_THREAD_LIBS_INIT}")
+endif()
+
 if (WIN32)
     set_target_properties(minifi-coap PROPERTIES
-        LINK_FLAGS "/WHOLEARCHIVE"
+         LINK_FLAGS "/WHOLEARCHIVE"
     )
 elseif (APPLE)
     set_target_properties(minifi-coap PROPERTIES

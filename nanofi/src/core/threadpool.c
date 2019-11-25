@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-#include "core/threadpool.h"
+#include <core/threadpool.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -50,76 +50,38 @@ uint64_t get_task_repeat_interval(task_t * task) {
     return task->interval_ms;
 }
 
-uint64_t get_time_millis(struct timespec ts) {
-    ts.tv_sec += ts.tv_nsec / 1000000000L;
-    ts.tv_nsec = ts.tv_nsec % 1000000000L;
-
-    uint64_t ms = (ts.tv_sec * 1000) + (ts.tv_nsec / 1000000L);
-    ts.tv_nsec = ts.tv_nsec % 1000000L;
-
-    ms += lround((double)((double)ts.tv_nsec / 1000000L));
-    return ms;
-}
-
-uint64_t get_now_ms() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return get_time_millis(ts);
-}
-
-struct timespec get_timespec_millis_from_now(uint64_t millis) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    ts.tv_nsec += millis * 1000000;
-    ts.tv_sec += ts.tv_nsec / 1000000000L;
-    ts.tv_nsec = ts.tv_nsec % 1000000000L;
-    return ts;
-}
-
-int condition_timed_wait(pthread_cond_t * cond, pthread_mutex_t * mutex, uint64_t millis) {
-#if defined(__APPLE__)
-    struct timespec ts;
-    ts.tv_sec = millis / 1000L;
-    ts.tv_nsec = (millis % 1000L) * 1000000L;
-    return pthread_cond_timedwait_relative_np(cond, mutex, &ts);
-#else
-    struct timespec millis_from_now = get_timespec_millis_from_now(millis);
-    return pthread_cond_timedwait(cond, mutex, &millis_from_now);
-#endif
-}
-
 void threadpool_add(threadpool_t * pool, task_node_t * task) {
-    pthread_mutex_lock(&pool->task_queue_mutex);
+	acquire_lock(&pool->task_queue_lock);
     if (pool->shuttingdown) {
-        pthread_mutex_unlock(&pool->task_queue_mutex);
+		release_lock(&pool->task_queue_lock);
         return;
     }
     LL_APPEND(pool->task_queue, task);
     pool->num_tasks++;
-    pthread_cond_signal(&pool->task_queue_cond);
-    pthread_mutex_unlock(&pool->task_queue_mutex);
+    condition_variable_signal(&pool->task_queue_cond);
+	release_lock(&pool->task_queue_lock);
 }
 
 uint64_t get_num_tasks(threadpool_t * pool) {
-    uint64_t ret = 0;
-    pthread_mutex_lock(&pool->task_queue_mutex);
-    ret = pool->num_tasks;
-    pthread_mutex_unlock(&pool->task_queue_mutex);
-    return ret;
+	uint64_t ret = 0;
+	acquire_lock(&pool->task_queue_lock);
+	ret = pool->num_tasks;
+	release_lock(&pool->task_queue_lock);
+	return ret;
 }
 
 threadpool_t * threadpool_create(uint64_t num_threads) {
-    if (num_threads == 0) {
-        return NULL;
-    }
-    threadpool_t * pool = (threadpool_t *)malloc(sizeof(threadpool_t));
-    memset(pool, 0, sizeof(threadpool_t));
-    pool->num_threads = num_threads;
-    pthread_mutex_init(&pool->task_queue_mutex, NULL);
-    pthread_cond_init(&pool->task_queue_cond, NULL);
-    pool->shuttingdown = 0;
-    pool->num_tasks = 0;
-    return pool;
+	if (num_threads == 0) {
+		return NULL;
+	}
+	threadpool_t * pool = (threadpool_t *)malloc(sizeof(threadpool_t));
+	memset(pool, 0, sizeof(threadpool_t));
+	pool->num_threads = num_threads;
+	initialize_lock(&pool->task_queue_lock);
+	initialize_cv(&pool->task_queue_cond, NULL);
+	pool->shuttingdown = 0;
+	pool->num_tasks = 0;
+	return pool;
 }
 
 task_node_t * get_task(task_node_t ** queue) {
@@ -145,19 +107,23 @@ int is_timer_expired(task_t * task) {
     return 0;
 }
 
+#ifndef WIN32
 void * threadpool_thread_function(void * pool) {
+#else
+unsigned __stdcall threadpool_thread_function(PVOID pool) {
+#endif
     if (!pool) {
-        return NULL;
+        return 0;
     }
 
     threadpool_t * thpool = (threadpool_t *)pool;
     for (;;) {
-        pthread_mutex_lock(&thpool->task_queue_mutex);
+        acquire_lock(&thpool->task_queue_lock);
 
         //while there are no tasks in the queue and the pool
         //is not shutting down wait on the condition variable
         while (thpool->shuttingdown == 0 && thpool->num_tasks == 0) {
-            pthread_cond_wait(&thpool->task_queue_cond, &thpool->task_queue_mutex);
+			condition_variable_wait(&thpool->task_queue_cond, &thpool->task_queue_lock);
         }
 
         if (thpool->shuttingdown) {
@@ -167,14 +133,14 @@ void * threadpool_thread_function(void * pool) {
         task_node_t * task = get_task(&thpool->task_queue);
 
         if (!task) {
-            pthread_mutex_unlock(&thpool->task_queue_mutex);
-            usleep(5000);
+            release_lock(&thpool->task_queue_lock);
+			thread_sleep_ms(5);
             continue;
         }
 
         if (thpool->num_tasks > 0)
             thpool->num_tasks--;
-        pthread_mutex_unlock(&thpool->task_queue_mutex);
+		release_lock(&thpool->task_queue_lock);
 
         if (is_task_repeatable(&task->task)) {
             task_state_t ret = RUN_AGAIN;
@@ -193,49 +159,55 @@ void * threadpool_thread_function(void * pool) {
             free(task->task.state);
             free(task);
         }
-        usleep(5000);
+		thread_sleep_ms(5);
     }
 
-    pthread_mutex_unlock(&thpool->task_queue_mutex);
-    return NULL;
+    release_lock(&thpool->task_queue_lock);
+    return 0;
 }
 
-void threadpool_start(threadpool_t * pool) {
+int threadpool_start(threadpool_t * pool) {
     if (!pool) {
-        return;
+        return -1;
     }
 
     if (!pool->started) {
-        pool->threads = (pthread_t *)malloc(sizeof(pthread_t) * pool->num_threads);
+		pool->threads = (thread_handle_t *)malloc(sizeof(thread_handle_t) * pool->num_threads);
         int i;
         for (i = 0; i < pool->num_threads; ++i) {
-            pthread_create(&pool->threads[i], NULL, &threadpool_thread_function, (void *)pool);
+			thread_proc_t proc;
+			proc.threadfunc = &threadpool_thread_function;
+			if (create_thread(&pool->threads[i], proc, (void *)pool) < 0) {
+                threadpool_shutdown(pool);
+                return -1;
+			}
         }
         pool->started = 1;
     }
+    return 0;
 }
 
 void threadpool_shutdown(threadpool_t * pool) {
     if (!pool || !pool->started) {
         return;
     }
-    pthread_mutex_lock(&(pool->task_queue_mutex));
+    acquire_lock(&(pool->task_queue_lock));
     if (pool->shuttingdown) {
-        pthread_mutex_unlock(&(pool->task_queue_mutex));
+		release_lock(&(pool->task_queue_lock));
         return;
     }
     pool->shuttingdown = 1;
-    pthread_cond_broadcast(&(pool->task_queue_cond));
-    pthread_mutex_unlock(&(pool->task_queue_mutex));
+    condition_variable_broadcast(&(pool->task_queue_cond));
+	release_lock(&(pool->task_queue_lock));
 
     int i;
     for (i = 0; i < pool->num_threads; ++i) {
-        pthread_join(pool->threads[i], NULL);
+		wait_thread_complete(&pool->threads[i]);
     }
 
-    pthread_mutex_lock(&pool->task_queue_mutex);
-    pthread_cond_destroy(&pool->task_queue_cond);
-    pthread_mutex_destroy(&pool->task_queue_mutex);
+	acquire_lock(&pool->task_queue_lock);
+    destroy_cv(&pool->task_queue_cond);
+    destroy_lock(&pool->task_queue_lock);
     free(pool->threads);
 
     task_node_t * head = pool->task_queue;
