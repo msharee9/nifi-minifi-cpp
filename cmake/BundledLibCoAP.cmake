@@ -20,6 +20,10 @@
 function(use_bundled_libcoap SOURCE_DIR BINARY_DIR)
     message("Using bundled libcoap")
 
+    # Define source
+    set(LIBCOAP_URL "https://github.com/obgm/libcoap/archive/v4.2.1.tar.gz")
+    set(LIBCOAP_URL_HASH "SHA256=29a0394a265d3febee41e5e2dc03d34292a0aede37f5f80334e529ac0dab2321")
+
     # Find patch executable
     find_package(Patch REQUIRED)
 
@@ -42,8 +46,8 @@ function(use_bundled_libcoap SOURCE_DIR BINARY_DIR)
 
         ExternalProject_Add(
                 coap-external
-                URL "https://github.com/obgm/libcoap/archive/v4.2.1.tar.gz"
-                URL_HASH "SHA256=29a0394a265d3febee41e5e2dc03d34292a0aede37f5f80334e529ac0dab2321"
+                URL ${LIBCOAP_URL}
+                URL_HASH ${LIBCOAP_URL_HASH}
                 CMAKE_ARGS ${LIBCOAP_CMAKE_ARGS}
                 PATCH_COMMAND ${PC}
                 BUILD_BYPRODUCTS "${BINARY_DIR}/thirdparty/libcoap-install/${BYPRODUCT}"
@@ -52,8 +56,8 @@ function(use_bundled_libcoap SOURCE_DIR BINARY_DIR)
     else()
         ExternalProject_Add(
                 coap-external
-                URL "https://github.com/obgm/libcoap/archive/v4.2.1.tar.gz"
-                URL_HASH "SHA256=29a0394a265d3febee41e5e2dc03d34292a0aede37f5f80334e529ac0dab2321"
+                URL ${LIBCOAP_URL}
+                URL_HASH ${LIBCOAP_URL_HASH}
                 BUILD_IN_SOURCE true
                 SOURCE_DIR "${BINARY_DIR}/thirdparty/libcoap-src"
                 BUILD_COMMAND make
