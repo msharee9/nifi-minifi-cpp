@@ -35,8 +35,10 @@ function(use_bundled_libcoap SOURCE_DIR BINARY_DIR)
     # Define byproducts
     if (WIN32)
         set(BYPRODUCT "lib/coap.lib")
+    elseif(APPLE)
+        set(BYPRODUCT "lib/libcoap-2-openssl.dylib")
     else()
-        set(BYPRODUCT "lib/libcoap-2.a")
+        set(BYPRODUCT "lib/libcoap-2-openssl.so")
     endif()
 
     # Build project
@@ -55,6 +57,23 @@ function(use_bundled_libcoap SOURCE_DIR BINARY_DIR)
         )
     else()
         ExternalProject_Add(
+                openssl111-external
+                URL "https://www.openssl.org/source/openssl-1.1.1d.tar.gz"
+                URL_HASH "SHA256=1e3a91bc1f9dfce01af26026f856e064eab4c8ee0a8f457b5ae30b40b8b711f2"
+                BUILD_IN_SOURCE true
+                SOURCE_DIR "${BINARY_DIR}/thirdparty/openssl111-src"
+                BUILD_COMMAND make
+                CMAKE_COMMAND ""
+                UPDATE_COMMAND ""
+                INSTALL_COMMAND make install_sw
+                BUILD_BYPRODUCTS "${BINARY_DIR}/thirdparty/libcoap-install/${BYPRODUCT}"
+                CONFIGURE_COMMAND ""
+                PATCH_COMMAND ./config --prefix=${BINARY_DIR}/thirdparty/openssl111-install no-shared
+                STEP_TARGETS build
+                EXCLUDE_FROM_ALL TRUE
+        )
+
+        ExternalProject_Add(
                 coap-external
                 URL ${LIBCOAP_URL}
                 URL_HASH ${LIBCOAP_URL_HASH}
@@ -66,10 +85,11 @@ function(use_bundled_libcoap SOURCE_DIR BINARY_DIR)
                 INSTALL_COMMAND make install
                 BUILD_BYPRODUCTS "${BINARY_DIR}/thirdparty/libcoap-install/${BYPRODUCT}"
                 CONFIGURE_COMMAND ""
-                PATCH_COMMAND ./autogen.sh && ./configure --disable-examples --disable-dtls --disable-tests --disable-documentation --prefix=${BINARY_DIR}/thirdparty/libcoap-install
+                PATCH_COMMAND ./autogen.sh && PKG_CONFIG_PATH=${BINARY_DIR}/thirdparty/openssl111-install/lib/pkgconfig/ ./configure --with-openssl --disable-examples --disable-tests --disable-documentation --prefix=${BINARY_DIR}/thirdparty/libcoap-install
                 STEP_TARGETS build
                 EXCLUDE_FROM_ALL TRUE
         )
+        add_dependencies(coap-external openssl111-external)
     endif()
 
     # Set variables
@@ -81,7 +101,11 @@ function(use_bundled_libcoap SOURCE_DIR BINARY_DIR)
     # Create imported targets
     file(MAKE_DIRECTORY ${COAP_INCLUDE_DIRS})
 
-    add_library(COAP::libcoap STATIC IMPORTED)
+    if (WIN32)
+        add_library(COAP::libcoap STATIC IMPORTED)
+    else()
+        add_library(COAP::libcoap SHARED IMPORTED)
+    endif()
     set_target_properties(COAP::libcoap PROPERTIES IMPORTED_LOCATION "${COAP_LIBRARY}")
     add_dependencies(COAP::libcoap coap-external)
     set_property(TARGET COAP::libcoap APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${COAP_INCLUDE_DIRS}")
