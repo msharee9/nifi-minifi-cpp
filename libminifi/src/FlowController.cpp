@@ -173,6 +173,8 @@ FlowController::~FlowController() {
   stop(true);
   stopC2();
   unload();
+  if (c2_agent_)
+    c2_agent_->stop();
   if (NULL != protocol_)
     delete protocol_;
   flow_file_repo_ = nullptr;
