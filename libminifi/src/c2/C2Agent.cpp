@@ -61,10 +61,7 @@ C2Agent::C2Agent(const std::shared_ptr<core::controller::ControllerServiceProvid
 
   last_run_ = std::chrono::steady_clock::now();
 
-  auto sharedController = controller_.lock();
-  if (sharedController) {
-    update_service_ = std::static_pointer_cast<controllers::UpdatePolicyControllerService>(sharedController->getControllerService(C2_AGENT_UPDATE_NAME));
-  }
+  update_service_ = std::static_pointer_cast<controllers::UpdatePolicyControllerService>(controller_->getControllerService(C2_AGENT_UPDATE_NAME));
 
   if (update_service_ == nullptr) {
     // create a stubbed service for updating the flow identifier
@@ -129,7 +126,6 @@ C2Agent::C2Agent(const std::shared_ptr<core::controller::ControllerServiceProvid
 }
 
 void C2Agent::start() {
-<<<<<<< HEAD
   if (controller_running_) {
     return;
   }
@@ -419,23 +415,18 @@ void C2Agent::extractPayload(const C2Payload &resp) {
 }
 
 void C2Agent::handle_c2_server_response(const C2ContentResponse &resp) {
-  auto update_sink = update_sink_.lock();
   switch (resp.op) {
     case Operation::CLEAR:
       // we've been told to clear something
       if (resp.name == "connection") {
         for (auto connection : resp.operation_arguments) {
-          if (update_sink) {
-            logger_->log_debug("Clearing connection %s", connection.second.to_string());
-            update_sink->clearConnection(connection.second.to_string());
-          }
+          logger_->log_debug("Clearing connection %s", connection.second.to_string());
+          update_sink_->clearConnection(connection.second.to_string());
         }
         C2Payload response(Operation::ACKNOWLEDGE, resp.ident, false, true);
         enqueue_c2_response(std::move(response));
       } else if (resp.name == "repositories") {
-        if (update_sink) {
-          update_sink->drainRepositories();
-        }
+        update_sink_->drainRepositories();
         C2Payload response(Operation::ACKNOWLEDGE, resp.ident, false, true);
         enqueue_c2_response(std::move(response));
       } else {
@@ -452,8 +443,7 @@ void C2Agent::handle_c2_server_response(const C2ContentResponse &resp) {
       handle_describe(resp);
       break;
     case Operation::RESTART: {
-      if (update_sink)
-          update_sink->stop(true);
+      update_sink_->stop(true);
       C2Payload response(Operation::ACKNOWLEDGE, resp.ident, false, true);
       protocol_.load()->consumePayload(std::move(response));
       restart_agent();
@@ -551,8 +541,8 @@ void C2Agent::handle_describe(const C2ContentResponse &resp) {
     enqueue_c2_response(std::move(response));
     return;
   } else if (resp.name == "jstack") {
-    if (update_sink && update_sink->isRunning()) {
-      const std::vector<BackTrace> traces = update_sink->getTraces();
+    if (update_sink_->isRunning()) {
+      const std::vector<BackTrace> traces = update_sink_->getTraces();
       for (const auto &trace : traces) {
         for (const auto & line : trace.getTraces()) {
           logger_->log_trace("%s -- %s", trace.getName(), line);
@@ -635,8 +625,7 @@ void C2Agent::handle_update(const C2ContentResponse &resp) {
       std::string raw_data_str((std::istreambuf_iterator<char>(new_conf)), std::istreambuf_iterator<char>());
       unlink(file_path.c_str());
       // if we can apply the update, we will acknowledge it and then backup the configuration file.
-      auto update_sink = update_sink_.lock();
-      if (update_sink && update_sink->applyUpdate(urlStr, raw_data_str)) {
+      if (update_sink_->applyUpdate(urlStr, raw_data_str)) {
         C2Payload response(Operation::ACKNOWLEDGE, state::UpdateState::FULLY_APPLIED, resp.ident, false, true);
         enqueue_c2_response(std::move(response));
 
@@ -690,8 +679,7 @@ void C2Agent::handle_update(const C2ContentResponse &resp) {
       logger_->log_debug("Did not have location within %s", resp.ident);
       auto update_text = resp.operation_arguments.find("configuration_data");
       if (update_text != resp.operation_arguments.end()) {
-        auto update_sink = update_sink_.lock();
-        if (update_sink && update_sink->applyUpdate(url->second.to_string(), update_text->second.to_string()) != 0 && persist != resp.operation_arguments.end()
+        if (update_sink_->applyUpdate(url->second.to_string(), update_text->second.to_string()) != 0 && persist != resp.operation_arguments.end()
             && utils::StringUtils::equalsIgnoreCase(persist->second.to_string(), "true")) {
           C2Payload response(Operation::ACKNOWLEDGE, state::UpdateState::FULLY_APPLIED, resp.ident, false, true);
           enqueue_c2_response(std::move(response));

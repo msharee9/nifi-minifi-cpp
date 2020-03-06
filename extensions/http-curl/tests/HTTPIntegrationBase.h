@@ -18,11 +18,11 @@
 #ifndef LIBMINIFI_TEST_INTEGRATION_HTTPINTEGRATIONBASE_H_
 #define LIBMINIFI_TEST_INTEGRATION_HTTPINTEGRATIONBASE_H_
 
-#include "../tests/TestServer.h"
 #include "CivetServer.h"
 #include "integration/IntegrationBase.h"
 #include "c2/C2Agent.h"
 #include "protocols/RESTSender.h"
+#include "TestServer.h"
 
 int log_message(const struct mg_connection *conn, const char *message) {
   puts(message);
