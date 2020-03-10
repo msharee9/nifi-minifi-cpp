@@ -208,10 +208,6 @@ class NodeReporter {
   virtual ~NodeReporter() {
   }
 
-  //This function will be removed when we remove TreeUpdateListener class
-  virtual int16_t getResponseNodes(std::vector<std::shared_ptr<ResponseNode>> &metric_vector, uint16_t metricsClass) {
-    return 0;
-  }
   /**
    * Retrieves metrics node
    * @return metrics response node
