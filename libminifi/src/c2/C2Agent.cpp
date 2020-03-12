@@ -520,10 +520,7 @@ void C2Agent::handle_describe(const C2ContentResponse &resp) {
       C2Payload metrics(Operation::ACKNOWLEDGE);
       metricsClass.empty() ? metrics.setLabel("metrics") : metrics.setLabel(metricsClass);
       if (metricsNode) {
-        C2Payload payload(Operation::ACKNOWLEDGE);
-        payload.setLabel(metricsNode->getName());
-        serializeMetrics(payload, metricsNode->getName(), metricsNode->serialize(), metricsNode->isArray());
-        metrics.addPayload(std::move(payload));
+        serializeMetrics(metrics, metricsNode->getName(), metricsNode->serialize(), metricsNode->isArray());
       }
       response.addPayload(std::move(metrics));
     }
