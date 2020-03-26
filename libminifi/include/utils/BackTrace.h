@@ -83,6 +83,26 @@ void pull_trace(uint8_t frames_to_skip = 1);
  */
 void emplace_handler();
 
+class Lock {
+public:
+  explicit Lock(std::mutex& mutex)
+      : mutex_(mutex) {
+    mutex_.lock();
+  }
+
+  ~Lock() {
+    mutex_.unlock();
+  }
+
+  Lock(const Lock& ) = delete;
+  Lock& operator=(const Lock& ) = delete;
+  Lock(Lock&& ) = delete;
+  Lock& operator=(Lock&& ) = delete;
+
+private:
+  std::mutex& mutex_;
+};
+
 /**
  * Purpose: Provides a singular instance to grab the call stack for thread(s).
  * Design: is a singleton to avoid multiple signal handlers.
