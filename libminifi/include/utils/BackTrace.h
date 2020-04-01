@@ -178,6 +178,7 @@ class TraceResolver {
 
  private:
   TraceResolver() = default;
+
   BackTrace trace_;
   mutable std::mutex mutex_;
 
