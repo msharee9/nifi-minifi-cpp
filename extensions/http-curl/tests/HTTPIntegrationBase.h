@@ -22,6 +22,7 @@
 #include "integration/IntegrationBase.h"
 #include "c2/C2Agent.h"
 #include "protocols/RESTSender.h"
+#include "TestBase.h"
 #include "TestServer.h"
 
 int log_message(const struct mg_connection *conn, const char *message) {
@@ -32,6 +33,29 @@ int log_message(const struct mg_connection *conn, const char *message) {
 int ssl_enable(void *ssl_context, void *user_data) {
   struct ssl_ctx_st *ctx = (struct ssl_ctx_st *) ssl_context;
   return 0;
+}
+
+struct cmd_args {
+  std::string test_file;
+  std::string key_dir;
+  std::string bad_test_file;
+  std::string url;
+};
+
+cmd_args parse_cmdline_args(int argc, char ** argv, const std::string& uri_path = "") {
+  cmd_args args;
+  if (argc > 1) {
+    args.test_file = argv[1];
+    args.url = "http://localhost:0/" + uri_path;
+  }
+  if (argc > 2) {
+    args.url = "https://localhost:0/" + uri_path;
+    args.key_dir = argv[2];
+  }
+  if (argc > 3) {
+    args.bad_test_file = argv[3];
+  }
+  return args;
 }
 
 class CoapIntegrationBase : public IntegrationBase {
@@ -53,6 +77,12 @@ class CoapIntegrationBase : public IntegrationBase {
       ret_val = ret_val.substr(0, ret_val.size() - 1);
     }
     return ret_val;
+  }
+
+  std::string getC2RestUrl() const {
+    std::string c2_rest_url;
+    configuration->get("nifi.c2.rest.url", c2_rest_url);
+    return c2_rest_url;
   }
 
  protected:
@@ -78,21 +108,21 @@ void CoapIntegrationBase::setUrl(std::string url, CivetHandler *handler) {
   } else {
     server = start_webserver(port, path, handler);
   }
+  bool secure{false};
   if (port == "0" || port == "0s") {
-    bool secure = (port == "0s");
+    secure = (port == "0s");
     port = std::to_string(server->getListeningPorts()[0]);
     if (secure) {
       port += "s";
     }
   }
+  std::string c2_url = std::string("http") + (secure ? "s" : "") + "://localhost:" + getWebPort() + path;
+  configuration->set("nifi.c2.rest.url", c2_url);
+  configuration->set("nifi.c2.rest.url.ack", c2_url);
 }
 
 class VerifyC2Base : public CoapIntegrationBase {
  public:
-  explicit VerifyC2Base(bool isSecure)
-      : isSecure(isSecure) {
-  }
-
   virtual void testSetup() {
     LogTestController::getInstance().setDebug<utils::HTTPClient>();
     LogTestController::getInstance().setDebug<LogTestController>();
@@ -104,26 +134,17 @@ class VerifyC2Base : public CoapIntegrationBase {
     configuration->set("nifi.c2.agent.protocol.class", "RESTSender");
     configuration->set("nifi.c2.enable", "true");
     configuration->set("nifi.c2.agent.class", "test");
-    configuration->set("nifi.c2.rest.url", c2_url);
     configuration->set("nifi.c2.agent.heartbeat.period", "1000");
-    configuration->set("nifi.c2.rest.url.ack", c2_url);
     configuration->set("nifi.c2.root.classes", "DeviceInfoNode,AgentInformation,FlowInformation");
   }
 
   void cleanup() {
     LogTestController::getInstance().reset();
   }
-
- protected:
-  bool isSecure;
 };
 
 class VerifyC2Describe : public VerifyC2Base {
  public:
-  explicit VerifyC2Describe(bool isSecure)
-      : VerifyC2Base(isSecure) {
-  }
-
   void testSetup() {
     LogTestController::getInstance().setTrace<minifi::c2::C2Agent>();
     LogTestController::getInstance().setDebug<minifi::c2::RESTSender>();
@@ -136,6 +157,80 @@ class VerifyC2Describe : public VerifyC2Base {
   }
 
   void runAssertions() {
+  }
+};
+
+class VerifyC2Update : public CoapIntegrationBase {
+ public:
+  explicit VerifyC2Update(uint64_t waitTime)
+      : CoapIntegrationBase(waitTime) {
+  }
+
+  void testSetup() {
+    LogTestController::getInstance().setInfo<minifi::FlowController>();
+    LogTestController::getInstance().setDebug<minifi::utils::HTTPClient>();
+    LogTestController::getInstance().setDebug<minifi::c2::RESTSender>();
+    LogTestController::getInstance().setDebug<minifi::c2::C2Agent>();
+  }
+
+  void configureC2() {
+    configuration->set("nifi.c2.agent.protocol.class", "RESTSender");
+    configuration->set("nifi.c2.enable", "true");
+    configuration->set("nifi.c2.agent.class", "test");
+    configuration->set("nifi.c2.agent.heartbeat.period", "1000");
+  }
+
+  void cleanup() {
+    LogTestController::getInstance().reset();
+  }
+
+  void runAssertions() {
+    assert(LogTestController::getInstance().contains("Starting to reload Flow Controller with flow control name MiNiFi Flow, version"));
+  }
+};
+
+class VerifyC2UpdateAgent : public VerifyC2Update {
+ public:
+  explicit VerifyC2UpdateAgent(uint64_t waitTime)
+      : VerifyC2Update(waitTime) {
+  }
+
+  void configureC2() {
+    VerifyC2Update::configureC2();
+    configuration->set("nifi.c2.agent.update.allow","true");
+    configuration->set("c2.agent.update.command", "echo \"verification command\"");
+  }
+
+  void testSetup() {
+    LogTestController::getInstance().setTrace<minifi::c2::C2Agent>();
+  }
+
+  void runAssertions() {
+    assert(LogTestController::getInstance().contains("removing file"));
+    assert(LogTestController::getInstance().contains("May not have command processor"));
+  }
+};
+
+class VerifyC2FailedUpdate : public VerifyC2Update {
+public:
+  explicit VerifyC2FailedUpdate(uint64_t waitTime)
+      : VerifyC2Update(waitTime) {
+  }
+
+  void testSetup() {
+    LogTestController::getInstance().setInfo<minifi::FlowController>();
+    LogTestController::getInstance().setDebug<minifi::c2::C2Agent>();
+    utils::file::FileUtils::create_dir("content_repository");
+  }
+
+  void runAssertions() {
+    assert(LogTestController::getInstance().contains("Invalid configuration payload"));
+    assert(LogTestController::getInstance().contains("update failed"));
+  }
+
+  void cleanup() {
+    utils::file::FileUtils::delete_dir("content_repository", true);
+    VerifyC2Update::cleanup();
   }
 };
 #endif /* LIBMINIFI_TEST_INTEGRATION_HTTPINTEGRATIONBASE_H_ */
