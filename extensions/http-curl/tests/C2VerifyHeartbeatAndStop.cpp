@@ -47,6 +47,7 @@ class VerifyC2Heartbeat : public VerifyC2Base {
     LogTestController::getInstance().setDebug<minifi::c2::RESTSender>();
     LogTestController::getInstance().setDebug<minifi::c2::RESTProtocol>();
     LogTestController::getInstance().setDebug<minifi::c2::RESTReceiver>();
+    LogTestController::getInstance().setInfo<minifi::FlowController>();
     VerifyC2Base::testSetup();
   }
 
@@ -71,18 +72,18 @@ public:
 int main(int argc, char **argv) {
   cmd_args args = parse_cmdline_args(argc, argv, "heartbeat");
   {
-    VerifyC2Heartbeat harness(isSecure);
-    harness.setKeyDir(key_dir);
-    HeartbeatHandler responder(isSecure);
-    harness.setUrl(url, &responder);
-    harness.run(test_file_location);
+    VerifyC2Heartbeat harness;
+    harness.setKeyDir(args.key_dir);
+    HeartbeatHandler responder;
+    harness.setUrl(args.url, &responder);
+    harness.run(args.test_file);
   }
 
-  VerifyLightWeightC2Heartbeat harness(isSecure);
-  harness.setKeyDir(key_dir);
-  LightWeightC2Handler responder(isSecure);
-  harness.setUrl(url, &responder);
-  harness.run(test_file_location);
+  VerifyLightWeightC2Heartbeat harness;
+  harness.setKeyDir(args.key_dir);
+  LightWeightC2Handler responder;
+  harness.setUrl(args.url, &responder);
+  harness.run(args.test_file);
 
   return 0;
 }

@@ -32,6 +32,7 @@ public:
     verifyJsonHasAgentManifest(root);
   }
 };
+
 int main(int argc, char **argv) {
   cmd_args args = parse_cmdline_args(argc, argv, "heartbeat");
   VerifyC2Describe harness;
